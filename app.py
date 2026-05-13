@@ -307,10 +307,11 @@ def api_add_entidade():
         descricao = body.get("descricao")
 
         # enregistrar na tabela de sugestões (mantemos histórico)
-        db.execute("""
+        cur = db.execute("""
             INSERT INTO entidade_nova (nome, tipo, descricao)
             VALUES (?,?,?)
         """, (nome, tipo, descricao))
+        entidade_nova_id = cur.lastrowid
 
         # Verificar se já existe uma entidade canónica com este nome
         row = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()
@@ -335,7 +336,7 @@ def api_add_entidade():
             eid = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()[0]
 
         db.commit()
-        return jsonify({"ok": True, "linked_documents": linked})
+        return jsonify({"ok": True, "linked_documents": linked, "entity_id": entidade_nova_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -355,11 +356,33 @@ def api_adicionados():
 @app.route('/api/entidade/<int:ent_id>/docs')
 def api_entidade_docs(ent_id):
     db = get_db()
-    # tentar entidade canónica
-    row = db.execute('SELECT nome FROM entidade_emissora WHERE id=?', (ent_id,)).fetchone()
+    
+    # Prioridade: procurar primeiro na entidade_nova (entidades adicionadas)
+    row = db.execute('SELECT nome, tipo, descricao FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
     if row:
         nome = row[0]
-        # tentar recuperar tipo a partir de rascunhos com mesmo nome (se existir)
+        entity_tipo = row[1]
+        rows = db.execute("""
+            SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
+                   d.numero, d.dr_number, d.serie, d.data, d.sumario,
+                   d.in_force, d.url_pdf
+            FROM documento d
+            WHERE d.entidades IS NOT NULL AND UPPER(d.entidades) LIKE UPPER(?)
+            ORDER BY d.data DESC
+        """, ('%'+nome+'%',)).fetchall()
+        docs = []
+        for r in rows:
+            rec = dict(r)
+            linked = db.execute('SELECT 1 FROM documento_entidade WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)', (rec['id'], nome)).fetchone()
+            rec['matched_by'] = 'linked' if linked else 'text_match'
+            rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            docs.append(rec)
+        return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
+    
+    # Fallback: procurar na entidade_emissora (entidades canónicas)
+    row2 = db.execute('SELECT nome FROM entidade_emissora WHERE id=?', (ent_id,)).fetchone()
+    if row2:
+        nome = row2[0]
         tipo_row = db.execute('SELECT tipo FROM entidade_nova WHERE UPPER(nome)=UPPER(?) ORDER BY criado_em DESC LIMIT 1', (nome,)).fetchone()
         entity_tipo = tipo_row[0] if tipo_row else None
         rows = db.execute('''
@@ -376,29 +399,6 @@ def api_entidade_docs(ent_id):
         for r in rows:
             rec = dict(r)
             rec['matched_by'] = 'linked'
-            rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
-            docs.append(rec)
-        return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
-
-    # fallback: entidade_nova (procurar por nome em documento.entidades)
-    row2 = db.execute('SELECT nome, tipo, descricao FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
-    if row2:
-        nome = row2[0]
-        entity_tipo = row2[1]
-        rows = db.execute("""
-            SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
-                   d.numero, d.dr_number, d.serie, d.data, d.sumario,
-                   d.in_force, d.url_pdf
-            FROM documento d
-            WHERE d.entidades IS NOT NULL AND UPPER(d.entidades) LIKE UPPER(?)
-            ORDER BY d.data DESC
-        """, ('%'+nome+'%',)).fetchall()
-        docs = []
-        # marcar se também existe ligação explícita em documento_entidade
-        for r in rows:
-            rec = dict(r)
-            linked = db.execute('SELECT 1 FROM documento_entidade WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)', (rec['id'], nome)).fetchone()
-            rec['matched_by'] = 'linked' if linked else 'text_match'
             rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
             docs.append(rec)
         return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
