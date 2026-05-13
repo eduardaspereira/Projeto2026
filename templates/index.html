@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DRE Ontologia — Diário da República</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="logo-escudo">🇵🇹</div>
+    <div class="header-title">
+      <h1>DRE Ontologia</h1>
+      <p>Diário da República Eletrónico — Explorador de Conhecimento</p>
+    </div>
+    <nav>
+      <button class="active" onclick="showView('pesquisa', this)">🔍 Pesquisa</button>
+      <button onclick="showView('ontologia', this)">🌳 Ontologia</button>
+      <button onclick="showView('adicionar', this)">➕ Adicionar</button>
+      <button onclick="showView('estatisticas', this)">📊 Estatísticas</button>
+    </nav>
+  </div>
+</header>
+
+<div class="main-wrapper">
+
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="panel">
+      <h3>Filtros</h3>
+      <div class="filter-group">
+        <label>Categoria</label>
+        <select id="f-categoria" onchange="search(1)">
+          <option value="">Todas</option>
+          <option value="Ato Normativo">Atos Normativos</option>
+          <option value="Ato Administrativo">Atos Administrativos</option>
+          <option value="Ato Informativo">Atos Informativos</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Série DR</label>
+        <select id="f-serie" onchange="search(1)">
+          <option value="">Todas</option>
+          <option value="1">Série I</option>
+          <option value="2">Série II</option>
+          <option value="3">Série III</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Vigência</label>
+        <select id="f-vigor" onchange="search(1)">
+          <option value="">Todos</option>
+          <option value="1">Em vigor</option>
+          <option value="0">Revogados</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Ano (início)</label>
+        <input type="number" id="f-ano-ini" placeholder="ex: 2000" onchange="search(1)" min="1910" max="2025">
+      </div>
+      <div class="filter-group">
+        <label>Ano (fim)</label>
+        <input type="number" id="f-ano-fim" placeholder="ex: 2023" onchange="search(1)" min="1910" max="2025">
+      </div>
+      <div class="filter-group">
+        <label>Entidade emissora</label>
+        <input type="text" id="f-entidade" placeholder="ex: Ministério" onchange="search(1)">
+      </div>
+      <button class="btn btn-secondary" style="width:100%;margin-top:.5rem" onclick="clearFilters()">Limpar filtros</button>
+    </div>
+
+    <div class="panel">
+      <h3>Classes OWL</h3>
+      <div id="owl-class-list">
+        <div style="color:var(--cinza3);font-size:.8rem">A carregar...</div>
+      </div>
+    </div>
+
+    <div class="panel" id="sidebar-stats">
+      <h3>Resumo</h3>
+      <div id="quick-stats"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+
+    <!-- PESQUISA -->
+    <div class="view active" id="view-pesquisa">
+      <div class="search-bar">
+        <input type="text" id="q" placeholder="Pesquisar em sumários, números, entidades..." onkeydown="if(event.key==='Enter')search(1)">
+        <button class="btn btn-primary" onclick="search(1)">Pesquisar</button>
+      </div>
+      <div class="result-info" id="result-info">
+        <span>Digite algo para pesquisar ou use os filtros</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Claint</th>
+              <th>Tipo</th>
+              <th>Número</th>
+              <th>Data</th>
+              <th>Série</th>
+              <th>Sumário</th>
+              <th>Vigência</th>
+              <th>PDF</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody">
+            <tr><td colspan="9" style="text-align:center;color:var(--cinza3);padding:2rem">Use a pesquisa ou filtros para explorar os documentos.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- ONTOLOGIA -->
+    <div class="view" id="view-ontologia">
+      <div class="panel">
+        <h3>Hierarquia de Classes</h3>
+        <div class="onto-tree">
+          <div class="level0">🌳 dre:DocumentoOficial</div>
+          <div class="level1">├─ dre:AtoNormativo</div>
+          <div class="level2">│  ├─ dre:Lei</div>
+          <div class="level3">│  │  └─ dre:LeiOrganica</div>
+          <div class="level2">│  ├─ dre:DecretoLei</div>
+          <div class="level2">│  ├─ dre:Decreto</div>
+          <div class="level3">│  │  └─ dre:DecretoRegulamentar</div>
+          <div class="level2">│  ├─ dre:Portaria</div>
+          <div class="level2">│  ├─ dre:Regulamento</div>
+          <div class="level2">│  ├─ dre:Resolucao</div>
+          <div class="level2">│  └─ dre:Rectificacao</div>
+          <div class="level1">├─ dre:AtoAdministrativo</div>
+          <div class="level2">│  ├─ dre:Despacho</div>
+          <div class="level3">│  │  └─ dre:DespachoExtrato</div>
+          <div class="level2">│  ├─ dre:Deliberacao</div>
+          <div class="level2">│  ├─ dre:Contrato</div>
+          <div class="level2">│  ├─ dre:Louvor</div>
+          <div class="level2">│  └─ dre:Declaracao</div>
+          <div class="level1">└─ dre:AtoInformativo</div>
+          <div class="level2">   ├─ dre:Aviso</div>
+          <div class="level3">   │  └─ dre:AvisoExtrato</div>
+          <div class="level2">   ├─ dre:AvisoContumax</div>
+          <div class="level2">   ├─ dre:AnuncioProcedimento</div>
+          <div class="level2">   ├─ dre:Anuncio</div>
+          <div class="level2">   └─ dre:Edital</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Propriedades de Dados</h3>
+        <table class="prop-table">
+          <thead><tr><th>Propriedade</th><th>Domínio</th><th>Tipo XSD</th><th>Descrição</th></tr></thead>
+          <tbody>
+            <tr><td>dre:claint</td><td>DocumentoOficial</td><td>xsd:integer</td><td>Identificador único no sistema DRE</td></tr>
+            <tr><td>dre:numero</td><td>DocumentoOficial</td><td>xsd:string</td><td>Número oficial do documento</td></tr>
+            <tr><td>dre:dataPublicacao</td><td>DocumentoOficial</td><td>xsd:date</td><td>Data de publicação no DR</td></tr>
+            <tr><td>dre:sumario</td><td>DocumentoOficial</td><td>xsd:string</td><td>Ementa/sumário descritivo</td></tr>
+            <tr><td>dre:emVigor</td><td>DocumentoOficial</td><td>xsd:boolean</td><td>Indica se está em vigor</td></tr>
+            <tr><td>dre:serie</td><td>PublicacaoDR</td><td>xsd:integer</td><td>Série do DR (I, II ou III)</td></tr>
+            <tr><td>dre:urlPDF</td><td>DocumentoOficial</td><td>xsd:anyURI</td><td>URL do PDF no dre.pt</td></tr>
+            <tr><td>dre:fonte</td><td>DocumentoOficial</td><td>xsd:string</td><td>Referência bibliográfica</td></tr>
+            <tr><td>dre:dreKey</td><td>DocumentoOficial</td><td>xsd:string</td><td>Chave interna DRE</td></tr>
+            <tr><td>dre:timestampCriacao</td><td>DocumentoOficial</td><td>xsd:dateTime</td><td>Data de criação do registo</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h3>Propriedades de Objeto (Relações)</h3>
+        <table class="prop-table">
+          <thead><tr><th>Propriedade</th><th>Domínio</th><th>Intervalo</th><th>Inversa</th></tr></thead>
+          <tbody>
+            <tr><td>dre:emitidoPor</td><td>DocumentoOficial</td><td>EntidadeEmissora</td><td>dre:emitiu</td></tr>
+            <tr><td>dre:publicadoEm</td><td>DocumentoOficial</td><td>PublicacaoDR</td><td>—</td></tr>
+            <tr><td>dre:revoga</td><td>DocumentoOficial</td><td>DocumentoOficial</td><td>dre:revogadoPor</td></tr>
+            <tr><td>dre:alteradoPor</td><td>DocumentoOficial</td><td>DocumentoOficial</td><td>—</td></tr>
+            <tr><td>dre:rectificadoPor</td><td>DocumentoOficial</td><td>Rectificacao</td><td>—</td></tr>
+            <tr><td>dre:suspensoPor</td><td>DocumentoOficial</td><td>DocumentoOficial</td><td>—</td></tr>
+            <tr><td>dre:desenvolve</td><td>DocumentoOficial</td><td>DocumentoOficial</td><td>—</td></tr>
+            <tr><td>dre:transponeDiretiva</td><td>DocumentoOficial</td><td>owl:Thing</td><td>—</td></tr>
+            <tr><td>dre:temRecurso</td><td>DocumentoOficial</td><td>RecursoDigital</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADICIONAR -->
+    <div class="view" id="view-adicionar">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">
+        <!-- Novo Documento -->
+        <div class="panel">
+          <h3>➕ Novo Documento</h3>
+          <form class="add-form" onsubmit="addDocument(event)">
+            <div class="form-group">
+              <label>Tipo de Documento (Classe OWL)</label>
+              <select name="owl_class" required>
+                <option value="">— selecionar —</option>
+                <optgroup label="Atos Normativos">
+                  <option value="dre:Lei">dre:Lei — Lei</option>
+                  <option value="dre:DecretoLei">dre:DecretoLei — Decreto-Lei</option>
+                  <option value="dre:Decreto">dre:Decreto — Decreto</option>
+                  <option value="dre:Portaria">dre:Portaria — Portaria</option>
+                  <option value="dre:Regulamento">dre:Regulamento — Regulamento</option>
+                  <option value="dre:Resolucao">dre:Resolucao — Resolução</option>
+                  <option value="dre:Rectificacao">dre:Rectificacao — Retificação</option>
+                </optgroup>
+                <optgroup label="Atos Administrativos">
+                  <option value="dre:Despacho">dre:Despacho — Despacho</option>
+                  <option value="dre:Deliberacao">dre:Deliberacao — Deliberação</option>
+                  <option value="dre:Contrato">dre:Contrato — Contrato</option>
+                  <option value="dre:Louvor">dre:Louvor — Louvor</option>
+                  <option value="dre:Declaracao">dre:Declaracao — Declaração</option>
+                </optgroup>
+                <optgroup label="Atos Informativos">
+                  <option value="dre:Aviso">dre:Aviso — Aviso</option>
+                  <option value="dre:AnuncioProcedimento">dre:AnuncioProcedimento — Anúncio de Procedimento</option>
+                  <option value="dre:Anuncio">dre:Anuncio — Anúncio</option>
+                  <option value="dre:Edital">dre:Edital — Edital</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Número do Documento</label>
+                <input type="text" name="numero" placeholder="ex: 123/2024">
+              </div>
+              <div class="form-group">
+                <label>Data de Publicação</label>
+                <input type="date" name="data">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Sumário / Ementa</label>
+              <textarea name="sumario" placeholder="Descrição sumária do documento..." required></textarea>
+            </div>
+            <div class="form-group">
+              <label>Entidades Emissoras (separadas por vírgula)</label>
+              <input type="text" name="entidades" placeholder="ex: Ministério da Saúde, Presidência da República">
+            </div>
+            <div class="form-group">
+              <label>Fonte / Referência</label>
+              <input type="text" name="fonte" placeholder="ex: DR 1.ª Série n.º 50/2024">
+            </div>
+            <div class="form-group">
+              <label>URL do PDF</label>
+              <input type="text" name="url_pdf" placeholder="https://dre.pt/...">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%">💾 Guardar Documento</button>
+          </form>
+        </div>
+
+        <!-- Nova Entidade -->
+        <div class="panel">
+          <h3>🏛️ Nova Entidade Emissora</h3>
+          <form class="add-form" onsubmit="addEntity(event)">
+            <div class="form-group">
+              <label>Nome da Entidade</label>
+              <input type="text" name="nome" placeholder="ex: Autoridade Nacional de Comunicações" required>
+            </div>
+            <div class="form-group">
+              <label>Classe OWL</label>
+              <select name="tipo">
+                <option value="dre:EntidadeEmissora">dre:EntidadeEmissora (genérica)</option>
+                <option value="dre:OrgaoSoberano">dre:OrgaoSoberano</option>
+                <option value="dre:Ministerio">dre:Ministerio</option>
+                <option value="dre:EntidadeLocal">dre:EntidadeLocal</option>
+                <option value="dre:EntidadeRegional">dre:EntidadeRegional</option>
+                <option value="dre:EntidadePublicaEmpresarial">dre:EntidadePublicaEmpresarial</option>
+                <option value="dre:Tribunal">dre:Tribunal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Descrição</label>
+              <textarea name="descricao" placeholder="Breve descrição da entidade e da sua função..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-gold" style="width:100%">💾 Guardar Entidade</button>
+          </form>
+
+          <div style="margin-top:1.5rem">
+            <h3 style="font-family:var(--serif);font-size:.88rem;color:var(--verde2);border-bottom:2px solid var(--ouro);padding-bottom:.35rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.06em">Entidades Adicionadas</h3>
+            <div id="new-entities-list" style="font-size:.8rem;color:var(--cinza3)">A carregar...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Documentos Adicionados -->
+      <div class="panel" style="margin-top:0">
+        <h3>📄 Documentos Adicionados</h3>
+        <div id="new-docs-list">
+          <div style="font-size:.8rem;color:var(--cinza3)">A carregar...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ESTATÍSTICAS -->
+    <div class="view" id="view-estatisticas">
+      <div class="stats-grid" id="stats-cards"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">
+        <div class="panel">
+          <h3>Top Tipos de Documento</h3>
+          <div class="bar-chart" id="chart-tipos"></div>
+        </div>
+        <div class="panel">
+          <h3>Top Entidades Emissoras</h3>
+          <div class="bar-chart" id="chart-entidades"></div>
+        </div>
+        <div class="panel">
+          <h3>Distribuição por Série</h3>
+          <div class="bar-chart" id="chart-series"></div>
+        </div>
+        <div class="panel">
+          <h3>Documentos por Década</h3>
+          <div class="bar-chart" id="chart-anos"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- MODAL DETALHE -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Documento</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

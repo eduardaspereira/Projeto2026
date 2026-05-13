@@ -1,0 +1,676 @@
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dc:   <http://purl.org/dc/elements/1.1/> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix dre:  <http://dre.pt/ontologia#> .
+@prefix drex: <http://dre.pt/recurso/> .
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONTOLOGIA: Diário da República Eletrónico (DRE)
+# Domínio  : Legislação e atos normativos publicados em Portugal
+# Versão   : 1.0  |  Data: 2026-05-06
+# Autores  : Gerado com base no dataset DRE dump (2024-04-14)
+# ─────────────────────────────────────────────────────────────────────────────
+
+<http://dre.pt/ontologia>
+    a owl:Ontology ;
+    rdfs:label "Ontologia do Diário da República Eletrónico"@pt ;
+    rdfs:label "Ontology of the Portuguese Official Gazette"@en ;
+    rdfs:comment """
+        Ontologia que modela os atos normativos e documentos publicados no
+        Diário da República Eletrónico (DRE) de Portugal.
+        Cobre documentos desde 1910, incluindo leis, decretos, despachos,
+        avisos, regulamentos e demais atos jurídico-administrativos.
+    """@pt ;
+    owl:versionInfo "1.0" ;
+    dct:created "2026-05-06"^^xsd:date ;
+    dct:language "pt" ;
+    dct:subject "Legislação Portuguesa", "Diário da República" ;
+    owl:imports <http://purl.org/dc/terms/> .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CLASSES
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── Classe raiz ──────────────────────────────────────────────────────────────
+
+dre:DocumentoOficial
+    a owl:Class ;
+    rdfs:label "Documento Oficial"@pt ;
+    rdfs:label "Official Document"@en ;
+    rdfs:comment "Classe raiz de todos os documentos publicados no Diário da República."@pt ;
+    skos:definition "Qualquer ato jurídico ou administrativo publicado oficialmente no Diário da República Eletrónico."@pt .
+
+# ─── Hierarquia de tipos de documento ────────────────────────────────────────
+
+dre:AtoNormativo
+    a owl:Class ;
+    rdfs:subClassOf dre:DocumentoOficial ;
+    rdfs:label "Ato Normativo"@pt ;
+    rdfs:comment "Documento com força normativa geral e abstrata."@pt .
+
+dre:AtoAdministrativo
+    a owl:Class ;
+    rdfs:subClassOf dre:DocumentoOficial ;
+    rdfs:label "Ato Administrativo"@pt ;
+    rdfs:comment "Documento que produz efeitos concretos e individualizados."@pt .
+
+dre:AtoInformativo
+    a owl:Class ;
+    rdfs:subClassOf dre:DocumentoOficial ;
+    rdfs:label "Ato Informativo / Aviso"@pt ;
+    rdfs:comment "Publicação de natureza informativa, sem efeitos normativos diretos."@pt .
+
+# ─── Atos Normativos ─────────────────────────────────────────────────────────
+
+dre:Constituicao
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Constituição"@pt ;
+    rdfs:comment "Lei fundamental do Estado."@pt .
+
+dre:Lei
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Lei"@pt ;
+    rdfs:comment "Ato legislativo da Assembleia da República."@pt .
+
+dre:LeiOrganica
+    a owl:Class ;
+    rdfs:subClassOf dre:Lei ;
+    rdfs:label "Lei Orgânica"@pt ;
+    rdfs:comment "Lei com força reforçada que rege matérias constitucionalmente reservadas."@pt .
+
+dre:DecretoLei
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Decreto-Lei"@pt ;
+    rdfs:comment "Ato legislativo do Governo com valor equivalente à lei."@pt .
+
+dre:Decreto
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Decreto"@pt ;
+    rdfs:comment "Ato normativo do Governo ou do Presidente da República."@pt .
+
+dre:DecretoRegulamentar
+    a owl:Class ;
+    rdfs:subClassOf dre:Decreto ;
+    rdfs:label "Decreto Regulamentar"@pt ;
+    rdfs:comment "Decreto destinado ao desenvolvimento e execução de leis."@pt .
+
+dre:Portaria
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Portaria"@pt ;
+    rdfs:comment "Ato normativo de um ou mais membros do Governo, de alcance geral."@pt .
+
+dre:Regulamento
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Regulamento"@pt ;
+    rdfs:comment "Norma regulamentar de entidade pública."@pt .
+
+dre:Resolucao
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Resolução"@pt ;
+    rdfs:comment "Resolução do Conselho de Ministros ou da Assembleia da República."@pt .
+
+dre:Rectificacao
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    rdfs:label "Retificação / Rectificação"@pt ;
+    rdfs:comment "Correção de erros materiais de atos normativos anteriormente publicados."@pt .
+
+# ─── Atos Administrativos ────────────────────────────────────────────────────
+
+dre:Despacho
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoAdministrativo ;
+    rdfs:label "Despacho"@pt ;
+    rdfs:comment "Decisão de membro do Governo ou de titular de cargo público."@pt .
+
+dre:DespachoExtrato
+    a owl:Class ;
+    rdfs:subClassOf dre:Despacho ;
+    rdfs:label "Despacho (extrato)"@pt ;
+    rdfs:comment "Publicação resumida do essencial de um despacho."@pt .
+
+dre:Deliberacao
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoAdministrativo ;
+    rdfs:label "Deliberação"@pt ;
+    rdfs:comment "Decisão colegial de órgão administrativo."@pt .
+
+dre:Contrato
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoAdministrativo ;
+    rdfs:label "Contrato"@pt ;
+    rdfs:comment "Instrumento contratual de entidade pública publicado no DR."@pt .
+
+dre:Louvor
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoAdministrativo ;
+    rdfs:label "Louvor"@pt ;
+    rdfs:comment "Distinção honorífica atribuída a funcionários ou entidades."@pt .
+
+dre:Declaracao
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoAdministrativo ;
+    rdfs:label "Declaração"@pt ;
+    rdfs:comment "Declaração de entidade pública com efeitos administrativos."@pt .
+
+# ─── Atos Informativos ───────────────────────────────────────────────────────
+
+dre:Aviso
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    rdfs:label "Aviso"@pt ;
+    rdfs:comment "Publicação informativa de entidade pública, sem carácter normativo direto."@pt .
+
+dre:AvisoExtrato
+    a owl:Class ;
+    rdfs:subClassOf dre:Aviso ;
+    rdfs:label "Aviso (extrato)"@pt ;
+    rdfs:comment "Publicação resumida do essencial de um aviso."@pt .
+
+dre:AnuncioProcedimento
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    rdfs:label "Anúncio de Procedimento"@pt ;
+    rdfs:comment "Publicação de abertura de concursos e procedimentos públicos."@pt .
+
+dre:Anuncio
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    rdfs:label "Anúncio"@pt ;
+    rdfs:comment "Publicação de carácter informativo geral."@pt .
+
+dre:AvisoContumax
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    rdfs:label "Aviso de Contumácia"@pt ;
+    rdfs:comment "Aviso de procedimento judicial por falta de comparência do arguido."@pt .
+
+dre:Edital
+    a owl:Class ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    rdfs:label "Edital"@pt ;
+    rdfs:comment "Publicação de carácter informativo de câmaras municipais e tribunais."@pt .
+
+# ─── Publicação ──────────────────────────────────────────────────────────────
+
+dre:PublicacaoDR
+    a owl:Class ;
+    rdfs:label "Publicação no Diário da República"@pt ;
+    rdfs:comment "Instância concreta de uma publicação no DR, com série, número e data."@pt .
+
+dre:SerieDR
+    a owl:Class ;
+    rdfs:label "Série do Diário da República"@pt ;
+    rdfs:comment "Série editorial do Diário da República (Série I, II ou III)."@pt .
+
+dre:EdicaoDR
+    a owl:Class ;
+    rdfs:label "Edição do Diário da República"@pt ;
+    rdfs:comment "Número específico de uma série do DR numa determinada data."@pt .
+
+# ─── Entidade Emissora ───────────────────────────────────────────────────────
+
+dre:EntidadeEmissora
+    a owl:Class ;
+    rdfs:label "Entidade Emissora"@pt ;
+    rdfs:label "Issuing Body"@en ;
+    rdfs:comment "Entidade pública responsável pela emissão de um documento oficial."@pt .
+
+dre:OrgaoSoberano
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Órgão de Soberania"@pt ;
+    rdfs:comment "Presidência da República, Assembleia da República, Governo, Tribunais."@pt .
+
+dre:Ministerio
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Ministério"@pt ;
+    rdfs:comment "Departamento ministerial do Governo."@pt .
+
+dre:EntidadeLocal
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Entidade Local"@pt ;
+    rdfs:comment "Autarquia, câmara municipal ou junta de freguesia."@pt .
+
+dre:EntidadeRegional
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Entidade Regional"@pt ;
+    rdfs:comment "Órgão das Regiões Autónomas dos Açores e da Madeira."@pt .
+
+dre:EntidadePublicaEmpresarial
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Entidade Pública Empresarial"@pt ;
+    rdfs:comment "Empresa pública ou entidade com estatuto especial."@pt .
+
+dre:Tribunal
+    a owl:Class ;
+    rdfs:subClassOf dre:EntidadeEmissora ;
+    rdfs:label "Tribunal"@pt ;
+    rdfs:comment "Órgão jurisdicional."@pt .
+
+# ─── Recurso Digital ─────────────────────────────────────────────────────────
+
+dre:RecursoDigital
+    a owl:Class ;
+    rdfs:label "Recurso Digital"@pt ;
+    rdfs:comment "Ficheiro digital associado ao documento (PDF, texto integral, etc.)."@pt .
+
+dre:PDF
+    a owl:Class ;
+    rdfs:subClassOf dre:RecursoDigital ;
+    rdfs:label "PDF"@pt ;
+    rdfs:comment "Versão em PDF do documento."@pt .
+
+dre:TextoIntegral
+    a owl:Class ;
+    rdfs:subClassOf dre:RecursoDigital ;
+    rdfs:label "Texto Integral"@pt ;
+    rdfs:comment "Versão em texto simples do conteúdo do documento."@pt .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PROPRIEDADES DE DADOS (Data Properties)
+# ═════════════════════════════════════════════════════════════════════════════
+
+dre:claint
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:integer ;
+    rdfs:label "Identificador claint"@pt ;
+    rdfs:comment "Identificador numérico único do documento na base de dados DRE."@pt .
+
+dre:numero
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:string ;
+    rdfs:label "Número do Documento"@pt ;
+    rdfs:comment "Número oficial atribuído ao documento (ex: 68/2023)."@pt .
+
+dre:numeroDR
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:PublicacaoDR ;
+    rdfs:range xsd:string ;
+    rdfs:label "Número do DR"@pt ;
+    rdfs:comment "Número da edição do Diário da República onde foi publicado."@pt .
+
+dre:dataPublicacao
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:date ;
+    rdfs:label "Data de Publicação"@pt ;
+    rdfs:comment "Data em que o documento foi publicado no Diário da República."@pt .
+
+dre:emVigor
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "Em Vigor"@pt ;
+    rdfs:comment "Indica se o documento está atualmente em vigor (true) ou revogado (false)."@pt .
+
+dre:condicional
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "Condicional"@pt ;
+    rdfs:comment "Indica se a vigência do documento está sujeita a condição."@pt .
+
+dre:emProcessamento
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "Em Processamento"@pt ;
+    rdfs:comment "Indica se o documento está a ser processado na base de dados DRE."@pt .
+
+dre:sumario
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:string ;
+    rdfs:label "Sumário / Ementa"@pt ;
+    rdfs:comment "Descrição sumária do conteúdo do documento (campo 'notes' no dataset)."@pt .
+
+dre:fonte
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:string ;
+    rdfs:label "Fonte"@pt ;
+    rdfs:comment "Referência bibliográfica da publicação no Diário da República."@pt .
+
+dre:dreKey
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:string ;
+    rdfs:label "DRE Key"@pt ;
+    rdfs:comment "Chave interna de identificação do documento no sistema DRE."@pt .
+
+dre:urlPDF
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:anyURI ;
+    rdfs:label "URL do PDF"@pt ;
+    rdfs:comment "Endereço URL para o ficheiro PDF do documento no dre.pt."@pt .
+
+dre:urlTextoIntegral
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:anyURI ;
+    rdfs:label "URL do Texto Integral"@pt ;
+    rdfs:comment "Endereço URL para o texto integral do documento."@pt .
+
+dre:erroPDF
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "Erro no PDF"@pt ;
+    rdfs:comment "Indica se ocorreu um erro ao obter o PDF do documento."@pt .
+
+dre:timestampCriacao
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Timestamp de Criação"@pt ;
+    rdfs:comment "Data e hora em que o registo foi criado na base de dados DRE."@pt .
+
+dre:serie
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:PublicacaoDR ;
+    rdfs:range xsd:integer ;
+    rdfs:label "Série"@pt ;
+    rdfs:comment "Número da série do DR (1 = Série I, 2 = Série II, 3 = Série III)."@pt .
+
+dre:nomeEntidade
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:EntidadeEmissora ;
+    rdfs:range xsd:string ;
+    rdfs:label "Nome da Entidade"@pt ;
+    rdfs:comment "Designação oficial da entidade emissora."@pt .
+
+dre:tipoDocumento
+    a owl:DatatypeProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range xsd:string ;
+    rdfs:label "Tipo de Documento"@pt ;
+    rdfs:comment "Designação textual do tipo de documento (ex: 'Decreto-Lei', 'Portaria')."@pt .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PROPRIEDADES DE OBJETO (Object Properties)
+# ═════════════════════════════════════════════════════════════════════════════
+
+dre:emitidoPor
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:EntidadeEmissora ;
+    rdfs:label "Emitido Por"@pt ;
+    rdfs:comment "Liga um documento à(s) entidade(s) que o emitiu/emitiram."@pt ;
+    owl:inverseOf dre:emitiu .
+
+dre:emitiu
+    a owl:ObjectProperty ;
+    rdfs:domain dre:EntidadeEmissora ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Emitiu"@pt ;
+    rdfs:comment "Liga uma entidade aos documentos por ela emitidos."@pt .
+
+dre:publicadoEm
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:PublicacaoDR ;
+    rdfs:label "Publicado Em"@pt ;
+    rdfs:comment "Liga o documento à sua publicação específica no DR."@pt .
+
+dre:pertenceASerie
+    a owl:ObjectProperty ;
+    rdfs:domain dre:PublicacaoDR ;
+    rdfs:range dre:SerieDR ;
+    rdfs:label "Pertence à Série"@pt ;
+    rdfs:comment "Liga uma publicação à série do DR a que pertence."@pt .
+
+dre:temRecurso
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:RecursoDigital ;
+    rdfs:label "Tem Recurso Digital"@pt ;
+    rdfs:comment "Liga um documento ao(s) seu(s) recurso(s) digital(is)."@pt .
+
+dre:revoga
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Revoga"@pt ;
+    rdfs:comment "Liga um documento ao(s) documento(s) que revoga."@pt ;
+    owl:inverseOf dre:revogadoPor .
+
+dre:revogadoPor
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Revogado Por"@pt ;
+    rdfs:comment "Liga um documento ao documento que o revogou."@pt .
+
+dre:alteradoPor
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Alterado Por"@pt ;
+    rdfs:comment "Liga um documento a outro que o alterou."@pt .
+
+dre:rectificadoPor
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:Rectificacao ;
+    rdfs:label "Retificado Por"@pt ;
+    rdfs:comment "Liga um documento à sua retificação."@pt .
+
+dre:suspensoPor
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Suspenso Por"@pt ;
+    rdfs:comment "Liga um documento ao documento que o suspendeu."@pt .
+
+dre:desenvolve
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range dre:DocumentoOficial ;
+    rdfs:label "Desenvolve / Regulamenta"@pt ;
+    rdfs:comment "Liga um diploma regulamentar ao diploma que desenvolve."@pt .
+
+dre:transponeDiretiva
+    a owl:ObjectProperty ;
+    rdfs:domain dre:DocumentoOficial ;
+    rdfs:range owl:Thing ;
+    rdfs:label "Transpõe Diretiva"@pt ;
+    rdfs:comment "Liga um diploma nacional à diretiva europeia que transpõe."@pt .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INDIVÍDUOS: Séries do DR
+# ═════════════════════════════════════════════════════════════════════════════
+
+drex:SerieI
+    a dre:SerieDR ;
+    rdfs:label "Série I do Diário da República"@pt ;
+    dre:serie 1 ;
+    rdfs:comment "Publica atos normativos de maior força jurídica: leis, decretos-lei, portarias, etc."@pt .
+
+drex:SerieII
+    a dre:SerieDR ;
+    rdfs:label "Série II do Diário da República"@pt ;
+    dre:serie 2 ;
+    rdfs:comment "Publica atos administrativos: avisos, despachos, deliberações, anúncios, etc."@pt .
+
+drex:SerieIII
+    a dre:SerieDR ;
+    rdfs:label "Série III do Diário da República"@pt ;
+    dre:serie 3 ;
+    rdfs:comment "Publica atos de autarquias locais e outras entidades."@pt .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INDIVÍDUOS: Principais Entidades Emissoras
+# ═════════════════════════════════════════════════════════════════════════════
+
+drex:PresidenciaRepublica
+    a dre:OrgaoSoberano ;
+    dre:nomeEntidade "Presidência da República" ;
+    rdfs:label "Presidência da República"@pt .
+
+drex:AssembleiaRepublica
+    a dre:OrgaoSoberano ;
+    dre:nomeEntidade "Assembleia da República" ;
+    rdfs:label "Assembleia da República"@pt .
+
+drex:TribunalConstitucional
+    a dre:Tribunal ;
+    dre:nomeEntidade "Tribunal Constitucional" ;
+    rdfs:label "Tribunal Constitucional"@pt .
+
+drex:MinisterioFinancas
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério das Finanças" ;
+    rdfs:label "Ministério das Finanças"@pt .
+
+drex:MinisterioJustica
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério da Justiça" ;
+    rdfs:label "Ministério da Justiça"@pt .
+
+drex:MinisterioSaude
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério da Saúde" ;
+    rdfs:label "Ministério da Saúde"@pt .
+
+drex:MinisterioEducacao
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério da Educação" ;
+    rdfs:label "Ministério da Educação"@pt .
+
+drex:MinisterioNegociosEstrangeiros
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério dos Negócios Estrangeiros" ;
+    rdfs:label "Ministério dos Negócios Estrangeiros"@pt .
+
+drex:MinisterioDefesaNacional
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério da Defesa Nacional" ;
+    rdfs:label "Ministério da Defesa Nacional"@pt .
+
+drex:MinisterioAdministracaoInterna
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério da Administração Interna" ;
+    rdfs:label "Ministério da Administração Interna"@pt .
+
+drex:MinisterioTrabalho
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério do Trabalho" ;
+    rdfs:label "Ministério do Trabalho"@pt .
+
+drex:MinisterioObrasPublicas
+    a dre:Ministerio ;
+    dre:nomeEntidade "Ministério das Obras Públicas" ;
+    rdfs:label "Ministério das Obras Públicas"@pt .
+
+drex:GovRegiaoAcores
+    a dre:EntidadeRegional ;
+    dre:nomeEntidade "Governo Regional dos Açores" ;
+    rdfs:label "Governo Regional dos Açores"@pt .
+
+drex:GovRegiaoMadeira
+    a dre:EntidadeRegional ;
+    dre:nomeEntidade "Governo Regional da Madeira" ;
+    rdfs:label "Governo Regional da Madeira"@pt .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RESTRIÇÕES (Restrictions) e axiomas adicionais
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Um documento deve ter pelo menos uma entidade emissora
+dre:DocumentoOficial
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty dre:emitidoPor ;
+        owl:minCardinality 1
+    ] .
+
+# Um documento deve ter exatamente uma data de publicação
+dre:DocumentoOficial
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty dre:dataPublicacao ;
+        owl:cardinality 1
+    ] .
+
+# Um documento tem exatamente um claint
+dre:DocumentoOficial
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty dre:claint ;
+        owl:cardinality 1
+    ] .
+
+# Um documento tem no máximo um URL de PDF
+dre:DocumentoOficial
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty dre:urlPDF ;
+        owl:maxCardinality 1
+    ] .
+
+# Classes disjuntas no nível de ato
+dre:AtoNormativo owl:disjointWith dre:AtoAdministrativo .
+dre:AtoNormativo owl:disjointWith dre:AtoInformativo .
+dre:AtoAdministrativo owl:disjointWith dre:AtoInformativo .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MAPEAMENTO DE TIPOS DO DATASET → CLASSES OWL
+# (usando skos:notation como vocabulário controlado)
+# ═════════════════════════════════════════════════════════════════════════════
+# Os valores abaixo são os valores reais do campo "doc_type" no dataset DRE.
+
+dre:Lei         skos:notation "Lei" .
+dre:DecretoLei  skos:notation "Decreto-Lei" ;
+                skos:notation "DECRETO-LEI" .
+dre:Decreto     skos:notation "Decreto" ;
+                skos:notation "DECRETO" .
+dre:Portaria    skos:notation "Portaria" ;
+                skos:notation "PORTARIA" .
+dre:Regulamento skos:notation "Regulamento" .
+dre:Resolucao   skos:notation "Resolução do Conselho de Ministros" ;
+                skos:notation "Resolução da Assembleia da República" .
+dre:Despacho    skos:notation "Despacho" ;
+                skos:notation "DESPACHO" .
+dre:DespachoExtrato
+                skos:notation "Despacho (extracto)" ;
+                skos:notation "Despacho (extrato)" .
+dre:Deliberacao skos:notation "Deliberação" ;
+                skos:notation "Deliberação (extrato)" ;
+                skos:notation "Deliberação (extracto)" .
+dre:Contrato    skos:notation "Contrato" .
+dre:Louvor      skos:notation "Louvor" .
+dre:Declaracao  skos:notation "Declaração" ;
+                skos:notation "DECLARAÇÃO" ;
+                skos:notation "Declaração de Retificação" .
+dre:Rectificacao skos:notation "Rectificação" ;
+                skos:notation "Retificação" .
+dre:Aviso       skos:notation "Aviso" ;
+                skos:notation "AVISO" .
+dre:AvisoExtrato skos:notation "Aviso (extrato)" ;
+                skos:notation "Aviso (extracto)" .
+dre:AvisoContumax skos:notation "Aviso de Contumácia" .
+dre:AnuncioProcedimento
+                skos:notation "Anúncio de procedimento" .
+dre:Anuncio     skos:notation "Anúncio" ;
+                skos:notation "ANÚNCIO" .
+dre:Edital      skos:notation "Edital" .
