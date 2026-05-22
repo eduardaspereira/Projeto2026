@@ -289,7 +289,7 @@ def load_data(filepath: str, db_path: str, limit: int = None):
             owl_class = get_owl_class(doc_type)
             categoria = CATEGORY_MAP.get(owl_class, "Outro")
 
-            entidades_str = ' | '.join([n.strip() for n in bodies if n]) if bodies else ''
+            entidades_str = ', '.join([n.strip() for n in bodies if n]) if bodies else ''
             batch_docs.append((
                 claint, doc_type, owl_class, categoria, numero, dr_number,
                 serie, data_pub, ano, sumario, entidades_str, fonte, dre_key,

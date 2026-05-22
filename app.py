@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 app.py — Aplicação Web DRE Ontologia
-Exploração, consulta e enriquecimento da ontologia do Diário da República.
+Exploração, consulta e enrichment da ontologia do Diário da República.
 
 Instalar dependências:
     pip install flask
@@ -29,8 +29,6 @@ PER_PAGE = 25
 # ─────────────────────────────────────────────────────────────────────────────
 # Base de dados
 
-# Nota: todo o HTML/CSS/JS foi movido para `templates/index.html` e `static/`.
-# Aqui ficam helpers mínimos de acesso à base de dados usados pelas rotas.
 def get_db():
     if 'db' not in g:
         conn = sqlite3.connect(DB_PATH)
@@ -50,7 +48,6 @@ def normalize(text):
 
 
 def split_entity_tokens(field):
-    # divide por separadores comuns (pipe, vírgula, ponto-e-vírgula) e por ' | '
     if not field:
         return []
     parts = re.split(r"\||,|;|\/", field)
@@ -116,7 +113,6 @@ def api_search():
         params.append(f"%{entidade}%")
 
     if q:
-        # FTS
         fts_ids = db.execute(
             "SELECT rowid FROM documento_fts WHERE documento_fts MATCH ? LIMIT 5000",
             (q + "*",)
@@ -178,7 +174,6 @@ def api_documento(doc_id):
         WHERE r.doc_origem = ? OR r.doc_destino = ?
     """, (doc_id, doc_id)).fetchall()
 
-    # construir representação com rótulo de exibição que depende da direção
     inverse_map = {
         'revoga': 'revogadoPor',
         'revogadoPor': 'revoga',
@@ -186,12 +181,10 @@ def api_documento(doc_id):
     rel_list = []
     for r in rels:
         rr = dict(r)
-        # determinar se o documento atual é origem ou destino
         if rr.get('doc_origem') == doc_id:
             rr['tipo_exibicao'] = rr.get('tipo_relacao')
             rr['direcao'] = 'origem'
         else:
-            # destino: inverter o rótulo quando possível
             rr['tipo_exibicao'] = inverse_map.get(rr.get('tipo_relacao'), rr.get('tipo_relacao'))
             rr['direcao'] = 'destino'
         rel_list.append(rr)
@@ -215,7 +208,6 @@ def api_relacao():
             "SELECT id FROM documento WHERE claint=?", (claint_dest,)).fetchone()
         if dest_row:
             dest_id = dest_row[0]
-    # fallback: accept explicit document id
     if dest_id is None and doc_destino is not None:
         dest_id = int(doc_destino)
 
@@ -235,11 +227,7 @@ def api_add_documento():
     db = get_db()
     body = request.get_json()
 
-    # Inserir numa tabela de rascunho (documento_novo) e também adicionar
-    # uma entrada mínima na tabela `documento` e no índice FTS para que
-    # o documento apareça imediatamente nas pesquisas.
     try:
-        # guardar na tabela de documentos novos (mantemos comportamento antigo)
         db.execute("""
             INSERT INTO documento_novo (doc_type, owl_class, numero, data, sumario, entidades, fonte, url_pdf)
             VALUES (?,?,?,?,?,?,?,?)
@@ -254,7 +242,6 @@ def api_add_documento():
             body.get("url_pdf"),
         ))
 
-        # Inserção mínima na tabela principal `documento`.
         doc_type_short = (body.get("owl_class") or "").split(":")[-1]
         owl_class_full = body.get("owl_class")
         numero = body.get("numero")
@@ -269,12 +256,9 @@ def api_add_documento():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (doc_type_short, owl_class_full, numero, data_val, sumario, entidades, fonte, url_pdf))
 
-        # Obter rowid do documento inserido
         rowid = cur.lastrowid
 
-        # Atualizar mapeamentos de entidades (opcional: tenta manter consistência)
         if entidades:
-            # entidades podem vir como 'A | B | C' ou lista; tratamos string
             for nome in [e.strip() for e in entidades.split("|") if e.strip()]:
                 try:
                     db.execute("INSERT OR IGNORE INTO entidade_emissora(nome) VALUES (?)", (nome,))
@@ -283,12 +267,10 @@ def api_add_documento():
                 except Exception:
                     pass
 
-        # Inserir também no índice FTS para pesquisa imediata
         try:
             db.execute("INSERT INTO documento_fts(rowid, claint, doc_type, numero, sumario, entidades) VALUES (?, ?, ?, ?, ?, ?)",
                        (rowid, None, doc_type_short, numero, sumario, entidades))
         except Exception:
-            # Se a tabela FTS não existir por algum motivo, ignoramos (ela será reconstruída mais tarde)
             pass
 
         db.commit()
@@ -306,34 +288,32 @@ def api_add_entidade():
         tipo = body.get("tipo")
         descricao = body.get("descricao")
 
-        # enregistrar na tabela de sugestões (mantemos histórico)
         cur = db.execute("""
             INSERT INTO entidade_nova (nome, tipo, descricao)
             VALUES (?,?,?)
         """, (nome, tipo, descricao))
         entidade_nova_id = cur.lastrowid
 
-        # Verificar se já existe uma entidade canónica com este nome
         row = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()
         linked = 0
         if row:
             eid = row[0]
-            # associar (INSERT OR IGNORE) todos os documentos cujo campo `entidades`
-            # contenha o token exacto do nome (tokenizado/normalizado)
-            target = normalize(nome)
-            docs = db.execute("SELECT id, entidades FROM documento WHERE entidades IS NOT NULL").fetchall()
+        else:
+            db.execute("INSERT INTO entidade_emissora(nome) VALUES (?)", (nome,))
+            eid = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()[0]
+
+        target = normalize(nome)
+        
+        if target:
+            docs = db.execute("SELECT id, entidades FROM documento WHERE entidades LIKE ?", (f'%{nome}%',)).fetchall()
             for d in docs:
                 tokens = split_entity_tokens(d['entidades'])
-                if target in tokens:
+                if len(tokens) == 1 and tokens[0] == target:
                     try:
                         db.execute("INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)", (d['id'], eid))
                         linked += 1
                     except Exception:
                         pass
-        else:
-            # criar nova entidade canónica
-            db.execute("INSERT INTO entidade_emissora(nome) VALUES (?)", (nome,))
-            eid = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()[0]
 
         db.commit()
         return jsonify({"ok": True, "linked_documents": linked, "entity_id": entidade_nova_id})
@@ -357,50 +337,72 @@ def api_adicionados():
 def api_entidade_docs(ent_id):
     db = get_db()
     
-    # Prioridade: procurar primeiro na entidade_nova (entidades adicionadas)
-    row = db.execute('SELECT nome, tipo, descricao FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
+    row = db.execute('SELECT nome, tipo, descricao, id FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
     if row:
         nome = row[0]
         entity_tipo = row[1]
+        target = normalize(nome)
+        
         rows = db.execute("""
             SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
                    d.numero, d.dr_number, d.serie, d.data, d.sumario,
-                   d.in_force, d.url_pdf
+                   d.in_force, d.url_pdf, d.entidades
             FROM documento d
-            WHERE d.entidades IS NOT NULL AND UPPER(d.entidades) LIKE UPPER(?)
+            WHERE d.entidades IS NOT NULL AND d.entidades LIKE ?
             ORDER BY d.data DESC
         """, ('%'+nome+'%',)).fetchall()
+        
         docs = []
         for r in rows:
             rec = dict(r)
-            linked = db.execute('SELECT 1 FROM documento_entidade WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)', (rec['id'], nome)).fetchone()
+            tokens = split_entity_tokens(rec['entidades'])
+            if len(tokens) != 1 or tokens[0] != target:
+                continue
+                
+            # CORREÇÃO DEFINITIVA: Mudado de entity_id para entidade_id aqui também
+            linked = db.execute("""
+                SELECT 1 FROM documento_entidade 
+                WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)
+            """, (rec['id'], nome)).fetchone()
+            
             rec['matched_by'] = 'linked' if linked else 'text_match'
             rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            
+            rec.pop('entidades', None)
             docs.append(rec)
+            
         return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
     
-    # Fallback: procurar na entidade_emissora (entidades canónicas)
     row2 = db.execute('SELECT nome FROM entidade_emissora WHERE id=?', (ent_id,)).fetchone()
     if row2:
         nome = row2[0]
+        target = normalize(nome)
         tipo_row = db.execute('SELECT tipo FROM entidade_nova WHERE UPPER(nome)=UPPER(?) ORDER BY criado_em DESC LIMIT 1', (nome,)).fetchone()
         entity_tipo = tipo_row[0] if tipo_row else None
+        
         rows = db.execute('''
             SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
                    d.numero, d.dr_number, d.serie, d.data, d.sumario,
-                   d.in_force, d.url_pdf,
+                   d.in_force, d.url_pdf, d.entidades,
                    1 AS linked
             FROM documento d
             JOIN documento_entidade de ON de.doc_id = d.id
             WHERE de.entidade_id = ?
             ORDER BY d.data DESC
         ''', (ent_id,)).fetchall()
+        
         docs = []
         for r in rows:
             rec = dict(r)
+            tokens = split_entity_tokens(rec.get('entidades') or '')
+            if len(tokens) != 1 or tokens[0] != target:
+                continue
+                
             rec['matched_by'] = 'linked'
             rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            rec.pop('entidades', None)
             docs.append(rec)
+            
         return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
 
     return jsonify({'entity': None, 'docs': []})
@@ -410,10 +412,14 @@ def api_entidade_docs(ent_id):
 def api_link_document(ent_id, doc_id):
     db = get_db()
     try:
-        # garantir que a entidade existe
-        if not db.execute('SELECT 1 FROM entidade_emissora WHERE id=?', (ent_id,)).fetchone():
-            return jsonify({'ok': False, 'error': 'Entidade canónica não encontrada'})
-        db.execute('INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)', (doc_id, ent_id))
+        nome_row = db.execute('SELECT nome FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
+        real_ent_id = ent_id
+        if nome_row:
+            emissora = db.execute('SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)', (nome_row[0],)).fetchone()
+            if emissora:
+                real_ent_id = emissora[0]
+
+        db.execute('INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)', (doc_id, real_ent_id))
         db.commit()
         return jsonify({'ok': True})
     except Exception as e:
@@ -424,7 +430,14 @@ def api_link_document(ent_id, doc_id):
 def api_unlink_document(ent_id, doc_id):
     db = get_db()
     try:
-        db.execute('DELETE FROM documento_entidade WHERE doc_id=? AND entidade_id=?', (doc_id, ent_id))
+        nome_row = db.execute('SELECT nome FROM entidade_nova WHERE id=?', (ent_id,)).fetchone()
+        real_ent_id = ent_id
+        if nome_row:
+            emissora = db.execute('SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)', (nome_row[0],)).fetchone()
+            if emissora:
+                real_ent_id = emissora[0]
+
+        db.execute('DELETE FROM documento_entidade WHERE doc_id=? AND entidade_id=?', (doc_id, real_ent_id))
         db.commit()
         return jsonify({'ok': True})
     except Exception as e:
@@ -501,11 +514,8 @@ def api_stats():
 def api_delete_documento(doc_id):
     db = get_db()
     try:
-        # remover relações onde participa
         db.execute('DELETE FROM relacao_documento WHERE doc_origem=? OR doc_destino=?', (doc_id, doc_id))
-        # remover ligações documento -> entidade
         db.execute('DELETE FROM documento_entidade WHERE doc_id=?', (doc_id,))
-        # remover o próprio documento (apenas rascunhos podem ser removidos normalmente, mas suportamos aqui)
         db.execute('DELETE FROM documento WHERE id=?', (doc_id,))
         db.commit()
         return jsonify({'ok': True})
@@ -517,23 +527,19 @@ def api_delete_documento(doc_id):
 def api_delete_entidade(ent_id):
     db = get_db()
     try:
-        # Tentamos primeiro eliminar da tabela de sugestões (entidade_nova)
         cur = db.execute('DELETE FROM entidade_nova WHERE id=?', (ent_id,))
         if cur.rowcount and cur.rowcount > 0:
             db.commit()
             return jsonify({'ok': True, 'deleted_from': 'entidade_nova'})
 
-        # Caso não exista nas sugestões, pode tratar-se de uma entidade canónica
-        # remover ligações documento <-> entidade e depois a própria entidade
         cur2 = db.execute('SELECT id FROM entidade_emissora WHERE id=?', (ent_id,)).fetchone()
+            
         if cur2:
-            # remover ligações
             db.execute('DELETE FROM documento_entidade WHERE entidade_id=?', (ent_id,))
             db.execute('DELETE FROM entidade_emissora WHERE id=?', (ent_id,))
             db.commit()
             return jsonify({'ok': True, 'deleted_from': 'entidade_emissora'})
 
-        # não encontrado
         return jsonify({'ok': False, 'error': 'Entidade não encontrada'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
@@ -579,4 +585,3 @@ if __name__ == "__main__":
     DB_PATH = args.db
     print(f"🇵🇹 DRE Ontologia — http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)
-

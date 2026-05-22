@@ -1,6 +1,7 @@
 // JS principal extraído do template HTML
 let currentPage = 1;
 let currentDocId = null;
+let currentEntityId = null; // Mantido no escopo global
 
 function showView(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -125,7 +126,6 @@ async function openDoc(id) {
                    : 'badge-info';
 
   const rels = (d.relacoes || []).map(r => {
-    // Mostrar explicitamente a outra extremidade dependendo da direção
     let otherClaint = '';
     let otherNumero = '';
     let suffix = '';
@@ -139,16 +139,12 @@ async function openDoc(id) {
       suffix = ' (origem)';
     }
     const badge = r.tipo_exibicao || r.tipo_relacao;
-    // Exibir apenas a extremidade relevante para relações assimétricas
     let relationText = '';
     if (badge === 'revoga') {
-      // quando revoga, mostra só o destino
       relationText = `${r.claint_destino || '—'} — ${r.numero_destino || '—'}`;
     } else if (badge === 'revogadoPor') {
-      // quando revogadoPor, mostra só a origem
       relationText = `${r.claint_origem || '—'} — ${r.numero_origem || '—'}`;
     } else {
-      // caso geral: Origem -> Destino
       const origemTxt = `Origem: ${r.claint_origem || '—'} — ${r.numero_origem || '—'}`;
       const destinoTxt = `Destino: ${r.claint_destino || '—'} — ${r.numero_destino || '—'}`;
       relationText = `${origemTxt} → ${destinoTxt}`;
@@ -281,7 +277,7 @@ async function loadAddedItems() {
         <div style="font-size:.82rem;font-weight:500">${e.nome}</div>
         ${e.descricao ? `<div style="font-size:.73rem;color:var(--cinza3)">${e.descricao}</div>` : ''}
         <div style="margin-top:.3rem">
-          <button class="btn btn-secondary" onclick="openEntity(event, ${e.id})">Abrir</button>
+          <button class="btn btn-secondary" onclick="openEntity(null, ${e.id})">Abrir</button>
           <button class="btn btn-danger" onclick="removeAddedEntity(event, ${e.id})">Remover</button>
         </div>
       </div>`).join('')
@@ -299,7 +295,6 @@ async function removeAddedDoc(ev, id) {
 
 async function openRascunho(ev, id) {
   ev.stopPropagation();
-  // buscar o rascunho e abrir o modal com campos mínimos
   const res = await fetch('/api/documento_novo/' + id);
   if (!res.ok) { showToast('Rascunho não encontrado', true); return; }
   const d = await res.json();
@@ -330,18 +325,20 @@ async function removeAddedEntity(ev, id) {
   else showToast('Erro: ' + (d.error||''), true);
 }
 
-let currentEntityId = null;
 async function openEntity(ev, id) {
-  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
   currentEntityId = id;
+  
   const res = await fetch('/api/entidade/' + id + '/docs');
   const d = await res.json();
   const title = d.entity || 'Entidade';
   const docs = d.docs || [];
   const entityTipo = d.entity_tipo;
+  
   document.getElementById('modal-title').textContent = `Entidade: ${title}` + (entityTipo ? ` — ${entityTipo}` : '');
+  
   if (!docs.length) {
-    document.getElementById('modal-body').innerHTML = '<div style="color:var(--cinza3)">Sem documentos associados.</div>';
+    document.getElementById('modal-body').innerHTML = '<div style="color:var(--cinza3);padding:1rem 0">Sem documentos associados.</div>';
   } else {
     document.getElementById('modal-body').innerHTML = `
       <div style="display:flex;flex-direction:column;gap:.5rem">
@@ -355,10 +352,12 @@ async function openEntity(ev, id) {
                 ${doc.class_match ? `<div style="background:#efe; color:#060; padding:.12rem .4rem;border-radius:.25rem;font-size:.72rem">Classe igual à entidade</div>` : ''}
               </div>
             </div>
-            <div style="margin-left:auto;display:flex;gap:.4rem;flex-direction:column">
+            <div style="margin-left:auto;display:flex;gap:.4rem;flex-direction:column;align-items:flex-end">
               <button class="btn btn-secondary" onclick="openDocFromTable(event, ${doc.id})">Abrir</button>
-              ${doc.matched_by === 'linked' ? `<button class="btn btn-danger" style="margin-top:.35rem" onclick="unlinkDoc(event, ${doc.id})">Desassociar</button>`
-              : `<button class="btn btn-gold" style="margin-top:.35rem" onclick="linkDoc(event, ${doc.id})">Associar</button>`}
+              ${doc.matched_by === 'linked' 
+                ? `<button class="btn btn-danger" style="margin-top:.35rem" onclick="unlinkDoc(event, ${doc.id})">Desassociar</button>`
+                : `<button class="btn btn-gold" style="margin-top:.35rem" onclick="linkDoc(event, ${doc.id})">Associar</button>`
+              }
             </div>
           </div>`).join('')}
       </div>`;
@@ -378,21 +377,28 @@ function clearFilters() {
 }
 
 async function linkDoc(ev, docId) {
-  ev.stopPropagation();
+  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
   if (!currentEntityId) { showToast('Entidade não definida', true); return; }
+  
   const linkRes = await fetch(`/api/entidade/${currentEntityId}/link/${docId}`, { method: 'POST' });
   const linkData = await linkRes.json();
-  if (linkData.ok) { showToast('Documento associado'); openEntity(new Event('click'), currentEntityId); }
+  if (linkData.ok) { 
+    showToast('Documento associado'); 
+    openEntity(null, currentEntityId); 
+  }
   else showToast('Erro: ' + (linkData.error||''), true);
 }
 
 async function unlinkDoc(ev, docId) {
-  ev.stopPropagation();
-  // similar heuristic to find entidade id based on modal title
+  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
   if (!currentEntityId) { showToast('Entidade não definida', true); return; }
+  
   const delRes = await fetch(`/api/entidade/${currentEntityId}/link/${docId}`, { method: 'DELETE' });
   const delData = await delRes.json();
-  if (delData.ok) { showToast('Ligação removida'); openEntity(new Event('click'), currentEntityId); }
+  if (delData.ok) { 
+    showToast('Ligação removida'); 
+    openEntity(null, currentEntityId); 
+  }
   else showToast('Erro: ' + (delData.error||''), true);
 }
 
@@ -446,7 +452,7 @@ function renderBarChart(elemId, items, max) {
       <div class="bar-num">${count.toLocaleString('pt-PT')}</div>
     </div>`;
   }).join('');
-  }
+}
 
 async function loadOwlClasses() {
   const res = await fetch('/api/owl-classes');
@@ -465,6 +471,12 @@ function filterByClass(cls, el) {
   const params = new URLSearchParams({owl_class: cls, page: 1, per_page: 25});
   fetch('/api/search?' + params).then(r=>r.json()).then(renderResults);
   showView('pesquisa', document.querySelector('nav button'));
+}
+
+async function loadQuickStats() {
+  const res = await fetch('/api/quickstats');
+  const d = await res.json();
+  // Se houver elementos de sumário rápido no index, preenche aqui opcionalmente.
 }
 
 loadOwlClasses();
