@@ -222,44 +222,82 @@ def api_relacao():
     return jsonify({"ok": True})
 
 
+@app.route("/api/entidades-criadas")
+def api_entidades_criadas():
+    """Retorna lista de entidades criadas (entidade_nova)"""
+    db = get_db()
+    rows = db.execute("""
+        SELECT id, nome, tipo FROM entidade_nova
+        ORDER BY criado_em DESC
+    """).fetchall()
+    return jsonify([{"id": r[0], "nome": r[1], "tipo": r[2]} for r in rows])
+
+
+@app.route("/api/documentos-novos")
+def api_documentos_novos():
+    """Retorna lista de documentos novos (documento_novo) para associar com entidades"""
+    db = get_db()
+    rows = db.execute("""
+        SELECT id, numero, owl_class, sumario FROM documento_novo
+        ORDER BY criado_em DESC LIMIT 50
+    """).fetchall()
+    return jsonify([{"id": r[0], "numero": r[1], "owl_class": r[2], "sumario": r[3]} for r in rows])
+
+
 @app.route("/api/documento", methods=["POST"])
 def api_add_documento():
     db = get_db()
     body = request.get_json()
 
     try:
-        db.execute("""
-            INSERT INTO documento_novo (doc_type, owl_class, numero, data, sumario, entidades, fonte, url_pdf)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (
-            body.get("owl_class", "").split(":")[-1],
-            body.get("owl_class"),
-            body.get("numero"),
-            body.get("data"),
-            body.get("sumario"),
-            body.get("entidades"),
-            body.get("fonte"),
-            body.get("url_pdf"),
-        ))
-
         doc_type_short = (body.get("owl_class") or "").split(":")[-1]
         owl_class_full = body.get("owl_class")
         numero = body.get("numero")
         data_val = body.get("data")
         sumario = body.get("sumario")
-        entidades = body.get("entidades")
         fonte = body.get("fonte")
         url_pdf = body.get("url_pdf")
+        
+        # Processar entidades: podem vir como texto (separadas por |) ou como IDs de entidades_nova
+        entidades_texto = (body.get("entidades") or "").strip()
+        entidades_ids = body.get("entidades_ids") or []  # Lista de IDs de entidade_nova
+        
+        # Construir lista final de nomes de entidades
+        entidades_lista = []
+        
+        # Adicionar entidades por texto
+        if entidades_texto:
+            entidades_lista.extend([e.strip() for e in entidades_texto.split("|") if e.strip()])
+        
+        # Adicionar entidades por ID (da entidade_nova)
+        if entidades_ids:
+            for ent_id in entidades_ids:
+                try:
+                    ent_row = db.execute("SELECT nome FROM entidade_nova WHERE id=?", (ent_id,)).fetchone()
+                    if ent_row:
+                        entidades_lista.append(ent_row[0])
+                except Exception:
+                    pass
+        
+        # Remover duplicatas mantendo ordem
+        entidades_lista = list(dict.fromkeys(entidades_lista))
+        entidades_final = "|" .join(entidades_lista) if entidades_lista else None
+
+        db.execute("""
+            INSERT INTO documento_novo (doc_type, owl_class, numero, data, sumario, entidades, fonte, url_pdf)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (doc_type_short, owl_class_full, numero, data_val, sumario, entidades_final, fonte, url_pdf))
 
         cur = db.execute("""
             INSERT INTO documento (doc_type, owl_class, numero, data, sumario, entidades, fonte, url_pdf, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        """, (doc_type_short, owl_class_full, numero, data_val, sumario, entidades, fonte, url_pdf))
+        """, (doc_type_short, owl_class_full, numero, data_val, sumario, entidades_final, fonte, url_pdf))
 
         rowid = cur.lastrowid
 
-        if entidades:
-            for nome in [e.strip() for e in entidades.split("|") if e.strip()]:
+        # Ligar entidades ao documento
+        if entidades_lista:
+            for nome in entidades_lista:
                 try:
                     db.execute("INSERT OR IGNORE INTO entidade_emissora(nome) VALUES (?)", (nome,))
                     eid = db.execute("SELECT id FROM entidade_emissora WHERE nome=?", (nome,)).fetchone()[0]
@@ -269,7 +307,7 @@ def api_add_documento():
 
         try:
             db.execute("INSERT INTO documento_fts(rowid, claint, doc_type, numero, sumario, entidades) VALUES (?, ?, ?, ?, ?, ?)",
-                       (rowid, None, doc_type_short, numero, sumario, entidades))
+                       (rowid, None, doc_type_short, numero, sumario, entidades_final))
         except Exception:
             pass
 
@@ -287,6 +325,7 @@ def api_add_entidade():
         nome = (body.get("nome") or "").strip()
         tipo = body.get("tipo")
         descricao = body.get("descricao")
+        doc_id_opcional = body.get("doc_id")  # Opção B: associar imediatamente a um documento
 
         cur = db.execute("""
             INSERT INTO entidade_nova (nome, tipo, descricao)
@@ -302,18 +341,26 @@ def api_add_entidade():
             db.execute("INSERT INTO entidade_emissora(nome) VALUES (?)", (nome,))
             eid = db.execute("SELECT id FROM entidade_emissora WHERE UPPER(nome)=UPPER(?)", (nome,)).fetchone()[0]
 
-        target = normalize(nome)
-        
-        if target:
-            docs = db.execute("SELECT id, entidades FROM documento WHERE entidades LIKE ?", (f'%{nome}%',)).fetchall()
-            for d in docs:
-                tokens = split_entity_tokens(d['entidades'])
-                if len(tokens) == 1 and tokens[0] == target:
-                    try:
-                        db.execute("INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)", (d['id'], eid))
-                        linked += 1
-                    except Exception:
-                        pass
+        # Se foi fornecido um doc_id, ligar imediatamente (Opção B)
+        if doc_id_opcional:
+            try:
+                db.execute("INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)", (doc_id_opcional, eid))
+                linked = 1
+            except Exception:
+                pass
+        else:
+            # Caso contrário, procurar documentos que mencionem o nome (comportamento anterior)
+            target = normalize(nome)
+            if target:
+                docs = db.execute("SELECT id, entidades FROM documento WHERE entidades LIKE ?", (f'%{nome}%',)).fetchall()
+                for d in docs:
+                    tokens = split_entity_tokens(d['entidades'])
+                    if len(tokens) == 1 and tokens[0] == target:
+                        try:
+                            db.execute("INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)", (d['id'], eid))
+                            linked += 1
+                        except Exception:
+                            pass
 
         db.commit()
         return jsonify({"ok": True, "linked_documents": linked, "entity_id": entidade_nova_id})
@@ -343,23 +390,24 @@ def api_entidade_docs(ent_id):
         entity_tipo = row[1]
         target = normalize(nome)
         
+        docs = []
+        
+        # ═══ Procurar em documento (históricos/já publicados) ═══
         rows = db.execute("""
             SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
                    d.numero, d.dr_number, d.serie, d.data, d.sumario,
-                   d.in_force, d.url_pdf, d.entidades
+                   d.in_force, d.url_pdf, d.entidades, NULL AS source
             FROM documento d
             WHERE d.entidades IS NOT NULL AND d.entidades LIKE ?
             ORDER BY d.data DESC
         """, ('%'+nome+'%',)).fetchall()
         
-        docs = []
         for r in rows:
             rec = dict(r)
             tokens = split_entity_tokens(rec['entidades'])
             if len(tokens) != 1 or tokens[0] != target:
                 continue
                 
-            # CORREÇÃO DEFINITIVA: Mudado de entity_id para entidade_id aqui também
             linked = db.execute("""
                 SELECT 1 FROM documento_entidade 
                 WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)
@@ -367,8 +415,31 @@ def api_entidade_docs(ent_id):
             
             rec['matched_by'] = 'linked' if linked else 'text_match'
             rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
-            
+            rec['source'] = 'documento'
             rec.pop('entidades', None)
+            docs.append(rec)
+        
+        # ═══ Procurar em documento_novo (recém-criados) ═══
+        rows_novo = db.execute("""
+            SELECT dn.id, NULL as claint, dn.doc_type, dn.owl_class, NULL as categoria,
+                   dn.numero, NULL as dr_number, NULL as serie, dn.data, dn.sumario,
+                   NULL as in_force, dn.url_pdf, dn.entidades, 1 as linked_flag
+            FROM documento_novo dn
+            WHERE dn.entidades IS NOT NULL AND dn.entidades LIKE ?
+            ORDER BY dn.criado_em DESC
+        """, ('%'+nome+'%',)).fetchall()
+        
+        for r in rows_novo:
+            rec = dict(r)
+            tokens = split_entity_tokens(rec['entidades'])
+            if len(tokens) != 1 or tokens[0] != target:
+                continue
+                
+            rec['matched_by'] = 'linked' if rec.get('linked_flag') else 'text_match'
+            rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            rec['source'] = 'documento_novo'
+            rec.pop('entidades', None)
+            rec.pop('linked_flag', None)
             docs.append(rec)
             
         return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})
@@ -380,18 +451,19 @@ def api_entidade_docs(ent_id):
         tipo_row = db.execute('SELECT tipo FROM entidade_nova WHERE UPPER(nome)=UPPER(?) ORDER BY criado_em DESC LIMIT 1', (nome,)).fetchone()
         entity_tipo = tipo_row[0] if tipo_row else None
         
+        docs = []
+        
+        # ═══ Documentos linked (documento_entidade) ═══
         rows = db.execute('''
             SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
                    d.numero, d.dr_number, d.serie, d.data, d.sumario,
-                   d.in_force, d.url_pdf, d.entidades,
-                   1 AS linked
+                   d.in_force, d.url_pdf, d.entidades, 1 AS linked_flag, NULL AS source
             FROM documento d
             JOIN documento_entidade de ON de.doc_id = d.id
             WHERE de.entidade_id = ?
             ORDER BY d.data DESC
         ''', (ent_id,)).fetchall()
         
-        docs = []
         for r in rows:
             rec = dict(r)
             tokens = split_entity_tokens(rec.get('entidades') or '')
@@ -400,7 +472,33 @@ def api_entidade_docs(ent_id):
                 
             rec['matched_by'] = 'linked'
             rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            rec['source'] = 'documento'
             rec.pop('entidades', None)
+            rec.pop('linked_flag', None)
+            docs.append(rec)
+        
+        # ═══ Documentos novos linked ═══
+        rows_novo = db.execute('''
+            SELECT dn.id, NULL as claint, dn.doc_type, dn.owl_class, NULL as categoria,
+                   dn.numero, NULL as dr_number, NULL as serie, dn.data, dn.sumario,
+                   NULL as in_force, dn.url_pdf, dn.entidades, 1 as linked_flag, 'documento_novo' as source
+            FROM documento_novo dn
+            JOIN documento_entidade de ON de.doc_id = dn.id
+            WHERE de.entidade_id = ?
+            ORDER BY dn.criado_em DESC
+        ''', (ent_id,)).fetchall()
+        
+        for r in rows_novo:
+            rec = dict(r)
+            tokens = split_entity_tokens(rec.get('entidades') or '')
+            if len(tokens) != 1 or tokens[0] != target:
+                continue
+                
+            rec['matched_by'] = 'linked'
+            rec['class_match'] = bool(entity_tipo and rec.get('owl_class') and rec.get('owl_class') == entity_tipo)
+            rec['source'] = 'documento_novo'
+            rec.pop('entidades', None)
+            rec.pop('linked_flag', None)
             docs.append(rec)
             
         return jsonify({'entity': nome, 'entity_tipo': entity_tipo, 'docs': docs})

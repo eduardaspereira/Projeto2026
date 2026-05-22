@@ -241,8 +241,22 @@
               <textarea name="sumario" placeholder="Descrição sumária do documento..." required></textarea>
             </div>
             <div class="form-group">
-              <label>Entidades Emissoras (separadas por vírgula)</label>
-              <input type="text" name="entidades" placeholder="ex: Ministério da Saúde, Presidência da República">
+              <label>Entidades Emissoras</label>
+              <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+                <div style="flex:1">
+                  <label style="font-size:.75rem;color:var(--cinza3);display:block;margin-bottom:.3rem">Selecionar Entidade Criada</label>
+                  <select id="form-entidades-ids" style="width:100%;padding:.4rem;border:1px solid var(--cinza2);border-radius:.3rem;font-size:.85rem">
+                    <option value="">— nenhuma —</option>
+                  </select>
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="addEntityToDoc()" style="align-self:flex-end;padding:.4rem .8rem;font-size:.85rem">+ Adicionar</button>
+              </div>
+              <div id="doc-entities-list" style="margin-bottom:.75rem;display:none">
+                <label style="font-size:.75rem;color:var(--verde2)">Entidades selecionadas:</label>
+                <div id="doc-entities-chips" style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.3rem"></div>
+              </div>
+              <input type="text" name="entidades" placeholder="ou digitar entidades separadas por vírgula (ex: Ministério da Saúde, Presidência)">
+              <input type="hidden" id="doc-entidades-ids-hidden" name="entidades_ids" value="">
             </div>
             <div class="form-group">
               <label>Fonte / Referência</label>
@@ -267,7 +281,7 @@
             <div class="form-group">
               <label>Classe OWL</label>
               <select name="tipo">
-                <option value="dre:EntidadeEmissora">dre:EntidadeEmissora (genérica)</option>
+                <option value="dre:EntidadeEmissora">dre:EntidadeEmissora</option>
                 <option value="dre:OrgaoSoberano">dre:OrgaoSoberano</option>
                 <option value="dre:Ministerio">dre:Ministerio</option>
                 <option value="dre:EntidadeLocal">dre:EntidadeLocal</option>
@@ -279,6 +293,14 @@
             <div class="form-group">
               <label>Descrição</label>
               <textarea name="descricao" placeholder="Breve descrição da entidade e da sua função..."></textarea>
+            </div>
+            <div class="form-group">
+          
+              <label style="font-size:.8rem;color:var(--cinza3);display:block;margin-bottom:.3rem">Documento para ligar á entidade</label>
+              <select id="entity-form-doc-id" name="doc_id">
+                <option value="">— nenhum —</option>
+              </select>
+          
             </div>
             <button type="submit" class="btn btn-gold" style="width:100%">💾 Guardar Entidade</button>
           </form>

@@ -5,3 +5,5 @@ RPCW2026-Projeto_Final.txt
 2024-04-14-DRE_dump.json.bz2
 .gitignore
 2024-04-14-DRE_dump.sql.bz2
+iot.py
+gateway.log

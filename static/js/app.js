@@ -9,7 +9,11 @@ function showView(id, btn) {
   document.getElementById('view-' + id).classList.add('active');
   if (btn) btn.classList.add('active');
   if (id === 'estatisticas') loadStats();
-  if (id === 'adicionar') loadAddedItems();
+  if (id === 'adicionar') {
+    loadAddedItems();
+    loadEntidadesCriadas();
+    loadDocumentosNovos();
+  }
 }
 
 function showToast(msg, err=false) {
@@ -217,6 +221,15 @@ async function addDocument(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const body = Object.fromEntries(fd);
+  
+  // Processar IDs de entidades selecionadas
+  const entidadesIdsStr = document.getElementById('doc-entidades-ids-hidden').value;
+  if (entidadesIdsStr) {
+    body.entidades_ids = entidadesIdsStr.split(',').map(Number).filter(n => n > 0);
+  } else {
+    body.entidades_ids = [];
+  }
+  
   const res = await fetch('/api/documento', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -226,7 +239,11 @@ async function addDocument(e) {
   if (d.ok) {
     showToast('Documento adicionado à ontologia!');
     e.target.reset();
+    document.getElementById('doc-entidades-ids-hidden').value = '';
+    document.getElementById('doc-entities-list').style.display = 'none';
+    document.getElementById('doc-entities-chips').innerHTML = '';
     loadAddedItems();
+    loadDocumentosNovos();  // Atualizar dropdown de documentos
   } else showToast('Erro: ' + (d.error||''), true);
 }
 
@@ -234,6 +251,14 @@ async function addEntity(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const body = Object.fromEntries(fd);
+  
+  // Converter doc_id para número se não estiver vazio
+  if (body.doc_id) {
+    body.doc_id = parseInt(body.doc_id);
+  } else {
+    delete body.doc_id;
+  }
+  
   const res = await fetch('/api/entidade', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -243,11 +268,13 @@ async function addEntity(e) {
   if (d.ok) {
     let msg = 'Entidade adicionada!';
     if (d.linked_documents && d.linked_documents > 0) {
-      msg += ` ${d.linked_documents} documento(s) ligados automaticamente à entidade.`;
+      msg += ` Ligada a ${d.linked_documents} documento(s).`;
     }
     showToast(msg);
     e.target.reset();
+    document.getElementById('entity-form-doc-id').value = '';
     loadAddedItems();
+    loadEntidadesCriadas();  // Atualizar dropdown de entidades no formulário de documento
   } else showToast('Erro: ' + (d.error||''), true);
 }
 
@@ -325,6 +352,107 @@ async function removeAddedEntity(ev, id) {
   else showToast('Erro: ' + (d.error||''), true);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OPÇÃO A: Carregar e gerenciar entidades no formulário de Novo Documento
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function loadEntidadesCriadas() {
+  try {
+    const res = await fetch('/api/entidades-criadas');
+    const entidades = await res.json();
+    const select = document.getElementById('form-entidades-ids');
+    if (select) {
+      select.innerHTML = '<option value="">— nenhuma —</option>' + 
+        entidades.map(e => `<option value="${e.id}">${e.nome} (${e.tipo})</option>`).join('');
+    }
+  } catch (err) {
+    console.error('Erro ao carregar entidades:', err);
+  }
+}
+
+function addEntityToDoc() {
+  const select = document.getElementById('form-entidades-ids');
+  const selectedId = select.value;
+  const selectedText = select.options[select.selectedIndex].text;
+  
+  if (!selectedId) {
+    showToast('Selecione uma entidade', true);
+    return;
+  }
+  
+  // Obter IDs já selecionados
+  const hiddenInput = document.getElementById('doc-entidades-ids-hidden');
+  let selectedIds = hiddenInput.value ? hiddenInput.value.split(',').map(Number) : [];
+  
+  // Evitar duplicatas
+  if (selectedIds.includes(Number(selectedId))) {
+    showToast('Esta entidade já foi adicionada', true);
+    return;
+  }
+  
+  selectedIds.push(Number(selectedId));
+  hiddenInput.value = selectedIds.join(',');
+  
+  // Mostrar chips das entidades selecionadas
+  const chipsList = document.getElementById('doc-entities-chips');
+  const listContainer = document.getElementById('doc-entities-list');
+  
+  chipsList.innerHTML = selectedIds.map(id => {
+    const option = Array.from(select.options).find(o => o.value === String(id));
+    const label = option ? option.text : `Entidade ${id}`;
+    return `<div style="background:var(--verde1);color:white;padding:.3rem .6rem;border-radius:.5rem;font-size:.75rem;display:flex;gap:.4rem;align-items:center">
+      ${label}
+      <button type="button" onclick="removeEntityFromDoc(${id})" style="background:none;border:none;color:white;cursor:pointer;font-weight:bold;padding:0">×</button>
+    </div>`;
+  }).join('');
+  
+  listContainer.style.display = 'block';
+  select.value = '';
+  showToast('Entidade adicionada ao documento');
+}
+
+function removeEntityFromDoc(id) {
+  const hiddenInput = document.getElementById('doc-entidades-ids-hidden');
+  let selectedIds = hiddenInput.value ? hiddenInput.value.split(',').map(Number) : [];
+  selectedIds = selectedIds.filter(eid => eid !== id);
+  hiddenInput.value = selectedIds.join(',');
+  
+  if (selectedIds.length === 0) {
+    document.getElementById('doc-entities-list').style.display = 'none';
+    document.getElementById('doc-entities-chips').innerHTML = '';
+  } else {
+    // Re-renderizar chips
+    const select = document.getElementById('form-entidades-ids');
+    const chipsList = document.getElementById('doc-entities-chips');
+    chipsList.innerHTML = selectedIds.map(eid => {
+      const option = Array.from(select.options).find(o => o.value === String(eid));
+      const label = option ? option.text : `Entidade ${eid}`;
+      return `<div style="background:var(--verde1);color:white;padding:.3rem .6rem;border-radius:.5rem;font-size:.75rem;display:flex;gap:.4rem;align-items:center">
+        ${label}
+        <button type="button" onclick="removeEntityFromDoc(${eid})" style="background:none;border:none;color:white;cursor:pointer;font-weight:bold;padding:0">×</button>
+      </div>`;
+    }).join('');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPÇÃO B: Carregar e gerenciar documentos no formulário de Nova Entidade
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function loadDocumentosNovos() {
+  try {
+    const res = await fetch('/api/documentos-novos');
+    const docs = await res.json();
+    const select = document.getElementById('entity-form-doc-id');
+    if (select) {
+      select.innerHTML = '<option value="">— nenhum —</option>' + 
+        docs.map(d => `<option value="${d.id}">${d.numero || '—'} (${d.owl_class})</option>`).join('');
+    }
+  } catch (err) {
+    console.error('Erro ao carregar documentos:', err);
+  }
+}
+
 async function openEntity(ev, id) {
   if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
   currentEntityId = id;
@@ -342,14 +470,18 @@ async function openEntity(ev, id) {
   } else {
     document.getElementById('modal-body').innerHTML = `
       <div style="display:flex;flex-direction:column;gap:.5rem">
-        ${docs.map(doc => `
+        ${docs.map(doc => {
+          const isNovoDoc = doc.source === 'documento_novo';
+          const badgeNovoHtml = isNovoDoc ? `<span style="background:#ffd; color:#990; padding:.12rem .4rem;border-radius:.25rem;font-size:.72rem;font-weight:500">📝 Rascunho</span>` : '';
+          return `
           <div style="display:flex;align-items:center;gap:.5rem;border-bottom:1px solid var(--cinza1);padding:.5rem 0">
             <div style="flex:1">
               <div style="font-weight:600">${doc.doc_type || doc.owl_class || 'Documento' } ${doc.numero ? '— ' + doc.numero : ''}</div>
               <div style="font-size:.85rem;color:var(--cinza3)">${(doc.sumario||'').slice(0,140)}</div>
-              <div style="display:flex;gap:.5rem;margin-top:.25rem;align-items:center">
+              <div style="display:flex;gap:.5rem;margin-top:.25rem;align-items:center;flex-wrap:wrap">
                 <div style="font-size:.75rem;color:var(--cinza4)">${doc.matched_by === 'linked' ? 'Ligado explicitamente à entidade' : 'Correspondência por texto no campo entidades'}</div>
                 ${doc.class_match ? `<div style="background:#efe; color:#060; padding:.12rem .4rem;border-radius:.25rem;font-size:.72rem">Classe igual à entidade</div>` : ''}
+                ${badgeNovoHtml}
               </div>
             </div>
             <div style="margin-left:auto;display:flex;gap:.4rem;flex-direction:column;align-items:flex-end">
@@ -359,7 +491,8 @@ async function openEntity(ev, id) {
                 : `<button class="btn btn-gold" style="margin-top:.35rem" onclick="linkDoc(event, ${doc.id})">Associar</button>`
               }
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>`;
   }
   document.getElementById('modal-overlay').classList.add('open');
