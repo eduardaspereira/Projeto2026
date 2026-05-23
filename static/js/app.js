@@ -234,6 +234,17 @@ async function addEntity(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const body = Object.fromEntries(fd);
+
+  // Recolher campos da classe OWL personalizada
+  const localname = (document.getElementById('owl-class-localname')?.value || '').trim();
+  const parent    = (document.getElementById('owl-class-parent')?.value || '').trim();
+  const label     = (document.getElementById('owl-class-label')?.value || '').trim();
+
+  // Garantir que o campo tipo tem o valor correcto (dre:NomeClasse)
+  if (localname) {
+    body.tipo = 'dre:' + localname;
+  }
+
   const res = await fetch('/api/entidade', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -241,12 +252,23 @@ async function addEntity(e) {
   });
   const d = await res.json();
   if (d.ok) {
+    // Injetar a nova classe na árvore de ontologia (persistida em localStorage)
+    if (localname) {
+      saveCustomClass(localname, parent, label);
+    }
+
     let msg = 'Entidade adicionada!';
     if (d.linked_documents && d.linked_documents > 0) {
       msg += ` ${d.linked_documents} documento(s) ligados automaticamente à entidade.`;
     }
     showToast(msg);
     e.target.reset();
+    // Limpar campos manuais e pré-visualização
+    if (document.getElementById('owl-class-localname')) document.getElementById('owl-class-localname').value = '';
+    if (document.getElementById('owl-class-parent'))    document.getElementById('owl-class-parent').value = '';
+    if (document.getElementById('owl-class-label'))     document.getElementById('owl-class-label').value = '';
+    if (document.getElementById('owl-preview'))         { document.getElementById('owl-preview').style.display='none'; }
+    if (document.getElementById('owl-class-final'))     document.getElementById('owl-class-final').value = 'dre:EntidadeEmissora';
     loadAddedItems();
   } else showToast('Erro: ' + (d.error||''), true);
 }
@@ -454,6 +476,83 @@ function renderBarChart(elemId, items, max) {
   }).join('');
 }
 
+// ─── Classes OWL personalizadas ───────────────────────────────────────────────
+
+const CUSTOM_CLASSES_KEY = 'dre_custom_owl_classes';
+
+function getCustomClasses() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_CLASSES_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveCustomClass(localname, parent, label) {
+  const classes = getCustomClasses();
+  const fullClass = 'dre:' + localname;
+  const fullParent = parent ? 'dre:' + parent : 'dre:EntidadeEmissora';
+  if (!classes.find(c => c.cls === fullClass)) {
+    classes.push({ cls: fullClass, parent: fullParent, label: label || localname });
+    localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
+  }
+  renderCustomClassesTree();
+}
+
+function renderCustomClassesTree() {
+  const classes = getCustomClasses();
+  const container = document.getElementById('custom-owl-classes-tree');
+  if (!container) return;
+  if (!classes.length) { container.innerHTML = ''; return; }
+
+  let html = `<div class="level1" style="margin-top:.5rem;border-top:1px dashed var(--cinza2);padding-top:.5rem;color:var(--cinza3);font-size:.75rem">
+    ✦ Classes personalizadas</div>`;
+  classes.forEach(c => {
+    html += `<div class="level2" style="display:flex;justify-content:space-between;align-items:center">
+      <span>├─ <span style="color:var(--verde2);font-weight:500">${c.cls}</span>
+        <span style="font-size:.68rem;color:var(--cinza3);font-family:var(--sans)">
+          ⊂ ${c.parent}${c.label ? ' — ' + c.label : ''}</span>
+      </span>
+      <button onclick="removeCustomClass('${c.cls}')"
+        style="background:none;border:none;cursor:pointer;color:var(--vermelho);font-size:.75rem;padding:.1rem .3rem"
+        title="Remover classe">✕</button>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+function removeCustomClass(cls) {
+  if (!confirm('Remover a classe ' + cls + ' da árvore?')) return;
+  const classes = getCustomClasses().filter(c => c.cls !== cls);
+  localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
+  renderCustomClassesTree();
+  showToast('Classe removida da árvore');
+}
+
+function updateOwlPreview() {
+  const localname = (document.getElementById('owl-class-localname')?.value || '').trim();
+  const parent    = (document.getElementById('owl-class-parent')?.value || '').trim();
+  const label     = (document.getElementById('owl-class-label')?.value || '').trim();
+  const preview   = document.getElementById('owl-preview');
+  const hidden    = document.getElementById('owl-class-final');
+
+  if (!localname) {
+    if (preview) { preview.style.display = 'none'; preview.textContent = ''; }
+    if (hidden)  hidden.value = 'dre:EntidadeEmissora';
+    return;
+  }
+
+  const fullClass  = 'dre:' + localname;
+  const fullParent = parent ? 'dre:' + parent : 'dre:EntidadeEmissora';
+  if (hidden) hidden.value = fullClass;
+  if (preview) {
+    preview.style.display = 'block';
+    preview.innerHTML =
+      `<strong>${fullClass}</strong> a owl:Class ;<br>` +
+      `&nbsp;&nbsp;rdfs:subClassOf <strong>${fullParent}</strong> ;<br>` +
+      (label ? `&nbsp;&nbsp;rdfs:label "${label}"@pt .` : '');
+  }
+}
+
+// ─── Classes OWL (sidebar) ────────────────────────────────────────────────────
+
 async function loadOwlClasses() {
   const res = await fetch('/api/owl-classes');
   const d = await res.json();
@@ -481,6 +580,7 @@ async function loadQuickStats() {
 
 loadOwlClasses();
 loadQuickStats();
+renderCustomClassesTree();
 
 async function removeRelacao(ev, rel_id) {
   ev.stopPropagation();

@@ -150,6 +150,8 @@
           <div class="level2">   ├─ dre:AnuncioProcedimento</div>
           <div class="level2">   ├─ dre:Anuncio</div>
           <div class="level2">   └─ dre:Edital</div>
+          <!-- Classes personalizadas adicionadas pelo utilizador -->
+          <div id="custom-owl-classes-tree"></div>
         </div>
       </div>
 
@@ -264,18 +266,59 @@
               <label>Nome da Entidade</label>
               <input type="text" name="nome" placeholder="ex: Autoridade Nacional de Comunicações" required>
             </div>
+
+            <!-- Bloco de definição de classe OWL personalizada -->
             <div class="form-group">
               <label>Classe OWL</label>
-              <select name="tipo">
-                <option value="dre:EntidadeEmissora">dre:EntidadeEmissora (genérica)</option>
-                <option value="dre:OrgaoSoberano">dre:OrgaoSoberano</option>
-                <option value="dre:Ministerio">dre:Ministerio</option>
-                <option value="dre:EntidadeLocal">dre:EntidadeLocal</option>
-                <option value="dre:EntidadeRegional">dre:EntidadeRegional</option>
-                <option value="dre:EntidadePublicaEmpresarial">dre:EntidadePublicaEmpresarial</option>
-                <option value="dre:Tribunal">dre:Tribunal</option>
-              </select>
+              <div style="background:var(--cinza1);border:1.5px solid var(--cinza2);border-radius:6px;padding:.75rem 1rem;font-family:var(--mono);font-size:.82rem;line-height:2">
+                <div style="color:var(--cinza3);font-size:.7rem;margin-bottom:.4rem;font-family:var(--sans);letter-spacing:.04em;text-transform:uppercase">Definição OWL Turtle (preencha os campos)</div>
+
+                <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.3rem">
+                  <span style="color:var(--verde2);font-weight:600">dre:</span><input
+                    id="owl-class-localname"
+                    name="owl_class_localname"
+                    type="text"
+                    placeholder="NomeClasse"
+                    required
+                    oninput="updateOwlPreview()"
+                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;width:180px;outline:none;padding:.1rem .2rem;color:var(--preto)">
+                  <span style="color:var(--cinza3)">a</span>
+                  <span style="color:#2a5a8a">owl:Class</span>
+                  <span style="color:var(--cinza3)">;</span>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.3rem;padding-left:1.5rem">
+                  <span style="color:#7a5a00">rdfs:subClassOf</span>
+                  <span style="color:var(--verde2);font-weight:600">dre:</span><input
+                    id="owl-class-parent"
+                    name="owl_class_parent"
+                    type="text"
+                    placeholder="EntidadeEmissora"
+                    oninput="updateOwlPreview()"
+                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;width:180px;outline:none;padding:.1rem .2rem;color:var(--preto)">
+                  <span style="color:var(--cinza3)">;</span>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:.4rem;flex-wrap:wrap;padding-left:1.5rem">
+                  <span style="color:#7a5a00;white-space:nowrap">rdfs:label</span>
+                  <span style="color:#8B0000">"</span><input
+                    id="owl-class-label"
+                    name="owl_class_label"
+                    type="text"
+                    placeholder="Rótulo legível"
+                    oninput="updateOwlPreview()"
+                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;flex:1;min-width:120px;outline:none;padding:.1rem .2rem;color:var(--preto)"><span style="color:#8B0000">"@pt</span>
+                  <span style="color:var(--cinza3)">.</span>
+                </div>
+              </div>
+
+              <!-- Pré-visualização da classe gerada -->
+              <div id="owl-preview" style="margin-top:.5rem;padding:.4rem .7rem;background:#f0f7f0;border-left:3px solid var(--verde);border-radius:0 4px 4px 0;font-family:var(--mono);font-size:.72rem;color:var(--verde2);display:none"></div>
+
+              <!-- Campo hidden que recebe o valor final dre:NomeClasse -->
+              <input type="hidden" name="tipo" id="owl-class-final" value="dre:EntidadeEmissora">
             </div>
+
             <div class="form-group">
               <label>Descrição</label>
               <textarea name="descricao" placeholder="Breve descrição da entidade e da sua função..."></textarea>
