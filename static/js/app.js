@@ -9,7 +9,11 @@ function showView(id, btn) {
   document.getElementById('view-' + id).classList.add('active');
   if (btn) btn.classList.add('active');
   if (id === 'estatisticas') loadStats();
-  if (id === 'adicionar') loadAddedItems();
+  if (id === 'adicionar') { 
+    loadAddedItems();
+    loadOntologyClasses();  // Carregar classes quando o utilizador abrir esta aba
+  }
+  if (id === 'ontologia') renderOntologyTree();
 }
 
 function showToast(msg, err=false) {
@@ -40,64 +44,6 @@ async function search(page=1) {
   renderResults(data);
 }
 
-function renderResults(data) {
-  const tbody = document.getElementById('results-tbody');
-  const info  = document.getElementById('result-info');
-  const pag   = document.getElementById('pagination');
-
-  if (!data.results.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--cinza3);padding:2rem">
-      Nenhum resultado encontrado.</td></tr>`;
-    info.innerHTML = '<span>0 resultados</span>';
-    pag.innerHTML = '';
-    return;
-  }
-
-  info.innerHTML = `<strong>${data.total.toLocaleString('pt-PT')}</strong> resultados
-    — página <strong>${data.page}</strong> de <strong>${data.pages}</strong>`;
-
-  tbody.innerHTML = data.results.map(r => {
-    const badgeClass = r.categoria === 'Ato Normativo' ? 'badge-norm'
-                     : r.categoria === 'Ato Administrativo' ? 'badge-adm'
-                     : r.categoria === 'Ato Informativo' ? 'badge-info' : 'badge-outro';
-    const vigencia = r.in_force
-      ? '<span class="vigente">● Em vigor</span>'
-      : '<span class="revogado">○ Revogado</span>';
-    const pdf = r.url_pdf
-      ? `<a href="${r.url_pdf}" target="_blank" class="link-doc" title="Abrir PDF">📄</a>` : '—';
-    const shortSumario = (r.sumario||'').length > 120
-      ? r.sumario.slice(0,120) + '…' : (r.sumario||'—');
-
-    return `<tr style="cursor:pointer">
-      <td><span style="font-family:var(--mono);font-size:.75rem">${r.claint||'—'}</span></td>
-      <td><span class="badge ${badgeClass}">${(r.doc_type||'').slice(0,22)}</span></td>
-      <td style="font-family:var(--mono);font-size:.75rem">${r.numero||'—'}</td>
-      <td style="font-family:var(--mono);font-size:.75rem;white-space:nowrap">${r.data||'—'}</td>
-      <td style="text-align:center;font-family:var(--mono)">S${r.serie||'?'}</td>
-      <td style="max-width:320px;font-size:.78rem">${shortSumario}</td>
-      <td>${vigencia}</td>
-      <td>${pdf}</td>
-      <td>
-        <button class="btn btn-secondary" onclick="openDocFromTable(event, ${r.id})">Abrir</button>
-        <button class="btn btn-danger" onclick="removeDoc(event, ${r.id})">Remover</button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  // Paginação
-  const pages = data.pages;
-  const cur = data.page;
-  let pagHtml = '';
-  if (cur > 1) pagHtml += `<button class="page-btn" onclick="search(${cur-1})">‹ Anterior</button>`;
-  const start = Math.max(1, cur-3), end = Math.min(pages, cur+3);
-  if (start > 1) pagHtml += `<button class="page-btn" onclick="search(1)">1</button><span>…</span>`;
-  for (let p = start; p <= end; p++) {
-    pagHtml += `<button class="page-btn ${p===cur?'current':''}" onclick="search(${p})">${p}</button>`;
-  }
-  if (end < pages) pagHtml += `<span>…</span><button class="page-btn" onclick="search(${pages})">${pages}</button>`;
-  if (cur < pages) pagHtml += `<button class="page-btn" onclick="search(${cur+1})">Seguinte ›</button>`;
-  pag.innerHTML = pagHtml;
-}
 
 function openDocFromTable(ev, id) {
   ev.stopPropagation();
@@ -235,14 +181,34 @@ async function addEntity(e) {
   const fd = new FormData(e.target);
   const body = Object.fromEntries(fd);
 
-  // Recolher campos da classe OWL personalizada
-  const localname = (document.getElementById('owl-class-localname')?.value || '').trim();
-  const parent    = (document.getElementById('owl-class-parent')?.value || '').trim();
-  const label     = (document.getElementById('owl-class-label')?.value || '').trim();
+  // Validar se classe foi selecionada
+  if (!body.classe_owl) {
+    showToast('Por favor, selecione ou crie uma classe OWL', true);
+    return;
+  }
 
-  // Garantir que o campo tipo tem o valor correcto (dre:NomeClasse)
-  if (localname) {
-    body.tipo = 'dre:' + localname;
+  // Se é nova classe, extrair e guardar os dados
+  let newClassInfo = null;
+  if (body.classe_owl === '__NEW__') {
+    const name = (document.getElementById('new-class-name').value || '').trim();
+    const parent = document.getElementById('new-class-parent').value;
+    const label = (document.getElementById('new-class-label').value || '').trim();
+    
+    if (!name) {
+      showToast('Por favor, introduza o nome da nova classe', true);
+      return;
+    }
+    
+    newClassInfo = {
+      name: name,
+      parent: parent,
+      label: label
+    };
+    
+    // Usar o valor final preenchido
+    body.tipo = document.getElementById('owl-class-final').value;
+  } else {
+    body.tipo = body.classe_owl;
   }
 
   const res = await fetch('/api/entidade', {
@@ -250,11 +216,16 @@ async function addEntity(e) {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(body)
   });
+  
   const d = await res.json();
   if (d.ok) {
-    // Injetar a nova classe na árvore de ontologia (persistida em localStorage)
-    if (localname) {
-      saveCustomClass(localname, parent, label);
+    // Se criou nova classe, adicionar à ontologia
+    if (newClassInfo) {
+      saveCustomClass(newClassInfo.name, newClassInfo.parent, newClassInfo.label);
+      // Re-renderizar árvore se a vista ontologia estiver ativa
+      if (document.getElementById('view-ontologia').classList.contains('active')) {
+        renderOntologyTree();
+      }
     }
 
     let msg = 'Entidade adicionada!';
@@ -263,14 +234,19 @@ async function addEntity(e) {
     }
     showToast(msg);
     e.target.reset();
-    // Limpar campos manuais e pré-visualização
-    if (document.getElementById('owl-class-localname')) document.getElementById('owl-class-localname').value = '';
-    if (document.getElementById('owl-class-parent'))    document.getElementById('owl-class-parent').value = '';
-    if (document.getElementById('owl-class-label'))     document.getElementById('owl-class-label').value = '';
-    if (document.getElementById('owl-preview'))         { document.getElementById('owl-preview').style.display='none'; }
-    if (document.getElementById('owl-class-final'))     document.getElementById('owl-class-final').value = 'dre:EntidadeEmissora';
+    
+    // Limpar e resetar campos
+    document.getElementById('class-selector').value = '';
+    document.getElementById('new-class-fields').style.display = 'none';
+    document.getElementById('new-class-name').value = '';
+    document.getElementById('new-class-label').value = '';
+    document.getElementById('new-class-preview').style.display = 'none';
+    document.getElementById('owl-class-final').value = '';
+    
     loadAddedItems();
-  } else showToast('Erro: ' + (d.error||''), true);
+  } else {
+    showToast('Erro: ' + (d.error||''), true);
+  }
 }
 
 async function loadAddedItems() {
@@ -315,6 +291,74 @@ async function removeAddedDoc(ev, id) {
   else showToast('Erro: ' + (d.error||''), true);
 }
 
+function renderResults(data) {
+  const tbody = document.getElementById('results-tbody');
+  const info  = document.getElementById('result-info');
+  const pag   = document.getElementById('pagination');
+
+  if (!data.results || !data.results.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--cinza3);padding:2rem">
+      Nenhum resultado encontrado.</td></tr>`;
+    info.innerHTML = '<span>0 resultados</span>';
+    pag.innerHTML = '';
+    return;
+  }
+
+  info.innerHTML = `<strong>${data.total.toLocaleString('pt-PT')}</strong> resultados
+    — página <strong>${data.page}</strong> de <strong>${data.pages}</strong>`;
+
+  tbody.innerHTML = data.results.map(r => {
+    // Definir estilos consoante seja um documento ou uma entidade
+    const badgeClass = r.is_entity ? 'badge-gold' 
+                     : r.categoria === 'Ato Normativo' ? 'badge-norm'
+                     : r.categoria === 'Ato Administrativo' ? 'badge-adm'
+                     : r.categoria === 'Ato Informativo' ? 'badge-info' : 'badge-outro';
+    
+    const rowColor = r.is_entity ? 'background-color: #fefcf2;' : ''; 
+    const vigencia = r.is_entity ? '—' : (r.in_force ? '<span class="vigente">● Em vigor</span>' : '<span class="revogado">○ Revogado</span>');
+    const pdf = r.url_pdf ? `<a href="${r.url_pdf}" target="_blank" class="link-doc" title="Abrir PDF">📄</a>` : '—';
+    const shortSumario = (r.sumario||'').length > 120 ? r.sumario.slice(0,120) + '…' : (r.sumario||'—');
+
+    // Botões de ação dinâmicos
+    let actionsHtml = '';
+    if (r.is_entity) {
+        actionsHtml = `<button class="btn btn-gold" onclick="openEntity(event, ${r.id})">🏛️ Entidade</button>`;
+    } else {
+        actionsHtml = `
+            <button class="btn btn-secondary" onclick="openDocFromTable(event, ${r.id})">Abrir</button>
+            <button class="btn btn-danger" onclick="removeDoc(event, ${r.id})">Remover</button>
+        `;
+    }
+
+    return `<tr style="cursor:pointer; ${rowColor}">
+      <td><span style="font-family:var(--mono);font-size:.75rem">${r.claint||'—'}</span></td>
+      <td><span class="badge ${badgeClass}" ${r.is_entity ? 'style="background:var(--ouro);color:#fff;"' : ''}>${r.is_entity ? '🏛️ Entidade' : (r.doc_type||'').slice(0,22)}</span></td>
+      <td style="font-family:var(--mono);font-size:.75rem">${r.numero||'—'}</td>
+      <td style="font-family:var(--mono);font-size:.75rem;white-space:nowrap">${r.data||'—'}</td>
+      <td style="text-align:center;font-family:var(--mono)">${r.serie && r.serie !== '—' ? 'S'+r.serie : '—'}</td>
+      <td style="max-width:320px;font-size:.78rem; ${r.is_entity ? 'font-weight:600; color:var(--verde2);' : ''}">${shortSumario}</td>
+      <td>${vigencia}</td>
+      <td>${pdf}</td>
+      <td style="white-space:nowrap;">${actionsHtml}</td>
+    </tr>`;
+  }).join('');
+
+  // Paginação padrão mantida
+  const pages = data.pages;
+  const cur = data.page;
+  let pagHtml = '';
+  if (cur > 1) pagHtml += `<button class="page-btn" onclick="search(${cur-1})">‹ Anterior</button>`;
+  const start = Math.max(1, cur-3), end = Math.min(pages, cur+3);
+  if (start > 1) pagHtml += `<button class="page-btn" onclick="search(1)">1</button><span>…</span>`;
+  for (let p = start; p <= end; p++) {
+    pagHtml += `<button class="page-btn ${p===cur?'current':''}" onclick="search(${p})">${p}</button>`;
+  }
+  if (end < pages) pagHtml += `<span>…</span><button class="page-btn" onclick="search(${pages})">${pages}</button>`;
+  if (cur < pages) pagHtml += `<button class="page-btn" onclick="search(${cur+1})">Seguinte ›</button>`;
+  pag.innerHTML = pagHtml;
+}
+
+
 async function openRascunho(ev, id) {
   ev.stopPropagation();
   const res = await fetch('/api/documento_novo/' + id);
@@ -322,6 +366,8 @@ async function openRascunho(ev, id) {
   const d = await res.json();
 
   document.getElementById('modal-title').textContent = (d.owl_class || 'Documento') + (d.numero ? ' n.º ' + d.numero : '');
+  
+  // O botão PDF foi adicionado ao flex-wrap abaixo do sumário
   document.getElementById('modal-body').innerHTML = `
     <div class="meta-grid">
       <dl class="meta-item"><dt>Classe OWL</dt><dd><span class="badge badge-norm">${d.owl_class||'—'}</span></dd></dl>
@@ -330,6 +376,11 @@ async function openRascunho(ev, id) {
       <dl class="meta-item"><dt>Entidade(s)</dt><dd style="font-size:.8rem">${(d.entidades||'') || '—'}</dd></dl>
     </div>
     ${d.sumario ? `<div class="sumario-box">${d.sumario}</div>` : ''}
+    
+    <div style="display:flex;gap:.5rem;margin:.75rem 0;flex-wrap:wrap">
+      ${d.url_pdf ? `<a href="${d.url_pdf}" target="_blank" class="btn btn-primary" style="font-size:.8rem;text-decoration:none">📄 Ver PDF</a>` : ''}
+    </div>
+
     <div style="font-family:var(--mono);font-size:.68rem;color:var(--cinza3);margin-top:1rem">
       Fonte: ${d.fonte||'—'}<br>
       Criado: ${d.criado_em||'—'}
@@ -493,74 +544,244 @@ function saveCustomClass(localname, parent, label) {
     classes.push({ cls: fullClass, parent: fullParent, label: label || localname });
     localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
   }
-  renderCustomClassesTree();
+  // Não renderizar aqui, vai ser renderizado quando a vista ontologia for acionada
 }
 
 function renderCustomClassesTree() {
-  const classes = getCustomClasses();
-  const container = document.getElementById('custom-owl-classes-tree');
-  if (!container) return;
-  if (!classes.length) { container.innerHTML = ''; return; }
-
-  let html = `<div class="level1" style="margin-top:.5rem;border-top:1px dashed var(--cinza2);padding-top:.5rem;color:var(--cinza3);font-size:.75rem">
-    ✦ Classes personalizadas</div>`;
-  classes.forEach(c => {
-    html += `<div class="level2" style="display:flex;justify-content:space-between;align-items:center">
-      <span>├─ <span style="color:var(--verde2);font-weight:500">${c.cls}</span>
-        <span style="font-size:.68rem;color:var(--cinza3);font-family:var(--sans)">
-          ⊂ ${c.parent}${c.label ? ' — ' + c.label : ''}</span>
-      </span>
-      <button onclick="removeCustomClass('${c.cls}')"
-        style="background:none;border:none;cursor:pointer;color:var(--vermelho);font-size:.75rem;padding:.1rem .3rem"
-        title="Remover classe">✕</button>
-    </div>`;
-  });
-  container.innerHTML = html;
+  // Função agora integrada em renderOntologyTree()
+  // Esta função é mantida por compatibilidade
 }
 
 function removeCustomClass(cls) {
   if (!confirm('Remover a classe ' + cls + ' da árvore?')) return;
   const classes = getCustomClasses().filter(c => c.cls !== cls);
   localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
-  renderCustomClassesTree();
+  renderOntologyTree();  // Re-renderizar a árvore
   showToast('Classe removida da árvore');
 }
 
-function updateOwlPreview() {
-  const localname = (document.getElementById('owl-class-localname')?.value || '').trim();
-  const parent    = (document.getElementById('owl-class-parent')?.value || '').trim();
-  const label     = (document.getElementById('owl-class-label')?.value || '').trim();
-  const preview   = document.getElementById('owl-preview');
-  const hidden    = document.getElementById('owl-class-final');
+// ─── Seleção de classes OWL e gerenciar nova classe ────────────────────────
 
-  if (!localname) {
-    if (preview) { preview.style.display = 'none'; preview.textContent = ''; }
-    if (hidden)  hidden.value = 'dre:EntidadeEmissora';
+async function loadOntologyClasses() {
+  try {
+    // Carregar todas as classes disponíveis para o selector
+    const res = await fetch('/api/owl-classes-all');
+    if (!res.ok) {
+      console.error('Erro ao carregar classes:', res.status);
+      return;
+    }
+    const classes = await res.json();
+    
+    // Popular a seleção de classes existentes
+    const otherGroup = document.getElementById('other-classes-group');
+    if (otherGroup && classes && classes.length > 0) {
+      // Filtrar as que já estão no primeiro optgroup
+      const existentes = new Set(['dre:EntidadeEmissora', 'dre:OrgaoSoberano', 'dre:Ministerio', 
+                                  'dre:EntidadeLocal', 'dre:EntidadeRegional', 'dre:EntidadePublicaEmpresarial', 'dre:Tribunal']);
+      const outras = classes.filter(c => !existentes.has(c.cls));
+      
+      if (outras.length > 0) {
+        otherGroup.innerHTML = outras.map(c => 
+          `<option value="${c.cls}">${c.label}</option>`
+        ).join('');
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao carregar ontologia:', err);
+  }
+}
+
+function toggleCustomClassFields() {
+  const selector = document.getElementById('class-selector');
+  const value = selector.value;
+  const fieldsContainer = document.getElementById('new-class-fields');
+  const finalInput = document.getElementById('owl-class-final');
+  
+  if (value === '__NEW__') {
+    // Mostrar campos para nova classe
+    fieldsContainer.style.display = 'block';
+    finalInput.value = '';  // Será preenchido quando validar
+  } else if (value) {
+    // Usar classe existente
+    fieldsContainer.style.display = 'none';
+    finalInput.value = value;
+    // Limpar campos de nova classe
+    document.getElementById('new-class-name').value = '';
+    document.getElementById('new-class-label').value = '';
+    document.getElementById('new-class-preview').style.display = 'none';
+  } else {
+    fieldsContainer.style.display = 'none';
+    finalInput.value = '';
+  }
+}
+
+function updateNewClassPreview() {
+  const name = (document.getElementById('new-class-name').value || '').trim();
+  const parent = document.getElementById('new-class-parent').value;
+  const label = (document.getElementById('new-class-label').value || '').trim();
+  const preview = document.getElementById('new-class-preview');
+  const finalInput = document.getElementById('owl-class-final');
+  
+  if (!name) {
+    preview.style.display = 'none';
+    finalInput.value = '';
     return;
   }
+  
+  const fullClass = 'dre:' + name;
+  finalInput.value = fullClass;
+  
+  let previewText = `${fullClass} a owl:Class ;\n`;
+  previewText += `  rdfs:subClassOf ${parent} ;\n`;
+  if (label) {
+    previewText += `  rdfs:label "${label}"@pt .`;
+  }
+  
+  preview.textContent = previewText;
+  preview.style.display = 'block';
+}
 
-  const fullClass  = 'dre:' + localname;
-  const fullParent = parent ? 'dre:' + parent : 'dre:EntidadeEmissora';
-  if (hidden) hidden.value = fullClass;
-  if (preview) {
-    preview.style.display = 'block';
-    preview.innerHTML =
-      `<strong>${fullClass}</strong> a owl:Class ;<br>` +
-      `&nbsp;&nbsp;rdfs:subClassOf <strong>${fullParent}</strong> ;<br>` +
-      (label ? `&nbsp;&nbsp;rdfs:label "${label}"@pt .` : '');
+// ─── Árvore de Ontologia Dinâmica ────────────────────────────────────────────
+
+async function renderOntologyTree() {
+  try {
+    const res = await fetch('/api/owl-classes-all');
+    if (!res.ok) {
+      console.error('Erro ao buscar classes OWL:', res.status);
+      return;
+    }
+    const allClasses = await res.json();
+  
+  // Definir a hierarquia: map de classe -> [subclasses]
+  const hierarchy = {
+    'dre:DocumentoOficial': [
+      'dre:AtoNormativo',
+      'dre:AtoAdministrativo',
+      'dre:AtoInformativo'
+    ],
+    'dre:AtoNormativo': [
+      'dre:Lei',
+      'dre:DecretoLei',
+      'dre:Decreto',
+      'dre:Portaria',
+      'dre:Regulamento',
+      'dre:Resolucao',
+      'dre:Rectificacao'
+    ],
+    'dre:Lei': ['dre:LeiOrganica'],
+    'dre:Decreto': ['dre:DecretoRegulamentar'],
+    'dre:AtoAdministrativo': [
+      'dre:Despacho',
+      'dre:Deliberacao',
+      'dre:Contrato',
+      'dre:Louvor',
+      'dre:Declaracao'
+    ],
+    'dre:Despacho': ['dre:DespachoExtrato'],
+    'dre:AtoInformativo': [
+      'dre:Aviso',
+      'dre:AvisoContumax',
+      'dre:AnuncioProcedimento',
+      'dre:Anuncio',
+      'dre:Edital'
+    ],
+    'dre:Aviso': ['dre:AvisoExtrato']
+  };
+
+  // Criar map de classe -> label para lookup rápido
+  const classMap = new Map(allClasses.map(c => [c.cls, c.label]));
+  
+  // Renderizar a árvore
+  let html = '';
+  
+  // Raiz: DocumentoOficial
+  html += `<div class="level0">🌳 dre:DocumentoOficial</div>`;
+  
+  // Função recursiva para renderizar subclasses
+  function renderChildren(parentClass, level, isLast = false) {
+    const children = hierarchy[parentClass] || [];
+    if (!children.length) return '';
+    
+    let html = '';
+    const prefix = isLast ? '   ' : '│  ';
+    
+    children.forEach((child, idx) => {
+      const isLastChild = idx === children.length - 1;
+      const icon = isLastChild ? '└─' : '├─';
+      const label = classMap.get(child) || child.replace('dre:', '');
+      
+      html += `<div class="level${level + 1}" style="${level > 2 ? 'opacity: 0.85;' : ''}">${prefix}${icon} <span style="font-weight:500">${child}</span> <span style="font-size:.75rem;color:var(--cinza3)">— ${label}</span></div>`;
+      
+      // Renderizar filhos deste filho
+      const grandchildrenHtml = renderChildren(child, level + 1, isLastChild);
+      if (grandchildrenHtml) {
+        html += grandchildrenHtml.split('\n').map(line => prefix + line).join('\n');
+      }
+    });
+    
+    return html;
+  }
+  
+  // Renderizar subclasses de DocumentoOficial
+  html += renderChildren('dre:DocumentoOficial', 1);
+  
+  // Adicionar secção de classes personalizadas
+  const customClasses = getCustomClasses();
+  if (customClasses.length > 0) {
+    html += `<div class="level1" style="margin-top:.75rem;border-top:1px dashed var(--cinza2);padding-top:.5rem">
+      <div style="color:var(--cinza3);font-size:.75rem;margin-bottom:.25rem">✦ Classes Personalizadas</div>`;
+    
+    customClasses.forEach(c => {
+      const label = c.label || c.cls.replace('dre:', '');
+      html += `<div class="level2" style="display:flex;justify-content:space-between;align-items:center;margin-top:.25rem">
+        <span>├─ <span style="color:var(--verde2);font-weight:500">${c.cls}</span>
+          <span style="font-size:.68rem;color:var(--cinza3)">${label}</span>
+        </span>
+        <button onclick="removeCustomClass('${c.cls}')" 
+          style="background:none;border:none;cursor:pointer;color:var(--vermelho);font-size:.75rem;padding:.1rem .3rem" 
+          title="Remover classe">✕</button>
+      </div>`;
+    });
+    
+    html += '</div>';
+  }
+  
+  document.getElementById('ontology-tree').innerHTML = html;
+  } catch (err) {
+    console.error('Erro ao renderizar ontologia:', err);
+    document.getElementById('ontology-tree').innerHTML = `<div style="color:var(--vermelho);padding:1rem">Erro ao carregar hierarquia</div>`;
   }
 }
 
 // ─── Classes OWL (sidebar) ────────────────────────────────────────────────────
 
 async function loadOwlClasses() {
-  const res = await fetch('/api/owl-classes');
-  const d = await res.json();
-  document.getElementById('owl-class-list').innerHTML = d.map(c =>
-    `<div class="onto-class" onclick="filterByClass('${c.owl_class}', this)" title="${c.owl_class}">
-      <span class="cls-name">${c.owl_class.replace('dre:','')}</span>
-      <span class="cls-count">${c.count.toLocaleString('pt-PT')}</span>
-    </div>`).join('');
+  try {
+    // Carregar TODAS as classes para exibição na sidebar (não apenas as usadas)
+    const res = await fetch('/api/owl-classes-all');
+    if (!res.ok) throw new Error('Erro ao buscar classes');
+    const allClasses = await res.json();
+    
+    // Também carregar as contagens de documentos por classe
+    const res2 = await fetch('/api/owl-classes');
+    if (!res2.ok) throw new Error('Erro ao buscar contagens');
+    const usedClasses = await res2.json();
+    const countMap = new Map(usedClasses.map(c => [c.owl_class, c.count]));
+    
+    // Combinar dados: mostrar todas as classes, com contagem se disponível
+    const classList = document.getElementById('owl-class-list');
+    if (classList) {
+      classList.innerHTML = allClasses.map(c => {
+        const count = countMap.get(c.cls) || 0;
+        return `<div class="onto-class" onclick="filterByClass('${c.cls}', this)" title="${c.cls}" style="opacity: ${count > 0 ? 1 : 0.6}">
+          <span class="cls-name">${c.label}</span>
+          <span class="cls-count">${count > 0 ? count.toLocaleString('pt-PT') : '—'}</span>
+        </div>`;
+      }).join('');
+    }
+  } catch (err) {
+    console.error('Erro ao carregar classes para sidebar:', err);
+  }
 }
 
 function filterByClass(cls, el) {
@@ -580,7 +801,6 @@ async function loadQuickStats() {
 
 loadOwlClasses();
 loadQuickStats();
-renderCustomClassesTree();
 
 async function removeRelacao(ev, rel_id) {
   ev.stopPropagation();
@@ -589,4 +809,207 @@ async function removeRelacao(ev, rel_id) {
   const d = await res.json();
   if (d.ok) { showToast('Relação removida'); openDoc(currentDocId); }
   else showToast('Erro: ' + (d.error||''), true);
+}
+
+// --- Lógica do Dropdown Adicionar ---
+function toggleAddDropdown(ev) {
+  ev.stopPropagation();
+  document.getElementById("addDropdownContainer").classList.toggle("show");
+}
+
+// Fecha o dropdown se clicares fora
+window.addEventListener('click', function(e) {
+  if (!e.target.matches('#addDropdownContainer button')) {
+    const dropdown = document.getElementById("addDropdownContainer");
+    if (dropdown && dropdown.classList.contains('show')) {
+      dropdown.classList.remove('show');
+    }
+  }
+});
+
+// ATUALIZAÇÃO DA FUNÇÃO openAddView
+function openAddView(type, ev) {
+  if (ev) ev.preventDefault();
+  
+  const navBtn = document.querySelector('#addDropdownContainer button');
+  showView('adicionar', navBtn);
+
+  const panelDoc = document.getElementById('panel-add-doc');
+  const panelEnt = document.getElementById('panel-add-ent');
+
+  if (type === 'documento') {
+    panelDoc.style.display = 'block';
+    panelEnt.style.display = 'none';
+    loadRdfDocumentOptions();
+  } else {
+    panelDoc.style.display = 'none';
+    panelEnt.style.display = 'block';
+    loadRdfEntityClasses(); 
+  }
+}
+
+async function loadRdfDocumentOptions() {
+  const selType = document.getElementById('rdf-doc-type');
+  const listEnt = document.getElementById('rdf-entities-list');
+  const listDoc = document.getElementById('rdf-docs-list');
+  
+  try {
+    const res = await fetch('/api/rdf/form-options');
+    if (!res.ok) throw new Error('Falha na resposta do servidor');
+    
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    // 1. Tipos de Documento
+    selType.innerHTML = '<option value="">— selecione o tipo —</option>' + 
+      data.classes_doc.map(c => `<option value="${c.uri}">${c.label}</option>`).join('');
+
+    // 2. Entidades Emissoras (Injeta o rótulo legível diretamente no value para a pesquisa funcionar)
+    listEnt.innerHTML = data.entidades.map(e => `<option value="${e.label}"></option>`).join('');
+
+    // 3. Documentos Existentes para Revogação
+    listDoc.innerHTML = data.documentos.map(d => `<option value="${d.label}"></option>`).join('');
+
+  } catch (err) {
+    showToast('Erro ao carregar dados do SQLite para o formulário.', true);
+  }
+}
+
+async function addRDFDocument(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-submit-rdf-doc');
+  btn.textContent = 'A gerar triplos e a comprimir...';
+  btn.disabled = true;
+
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd);
+
+  try {
+    const res = await fetch('/api/rdf/documento', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    
+    const d = await res.json();
+    if (d.ok) {
+      showToast('Documento injetado na ontologia com sucesso!');
+      e.target.reset();
+    } else {
+      showToast('Erro: ' + (d.error || 'Falha na inserção'), true);
+    }
+  } catch(err) {
+    showToast('Erro de comunicação com o servidor.', true);
+  } finally {
+    btn.textContent = '💾 Gerar Triplos e Guardar';
+    btn.disabled = false;
+  }
+}
+
+// --- Fetch & Inserção RDF ---
+async function loadRdfEntityClasses() {
+  const sel = document.getElementById('rdf-class-selector');
+  sel.innerHTML = '<option value="">A carregar opções...</option>';
+  
+  try {
+    const res = await fetch('/api/rdf/classes');
+    if (!res.ok) throw new Error('Falha na resposta do servidor');
+    
+    const classes = await res.json();
+    if (classes.error) throw new Error(classes.error);
+
+    sel.innerHTML = '<option value="">— selecione a classe mãe —</option>' + 
+      classes.map(c => `<option value="${c.uri}">${c.label}</option>`).join('');
+  } catch (err) {
+    showToast('Erro ao carregar classes RDF da base de dados.', true);
+    sel.innerHTML = '<option value="">Erro ao carregar opções</option>';
+  }
+}
+
+async function addRDFEntity(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-submit-rdf');
+  btn.textContent = 'A injetar triplos e a comprimir...';
+  btn.disabled = true;
+
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd);
+
+  try {
+    const res = await fetch('/api/rdf/entidade', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    
+    const d = await res.json();
+    if (d.ok) {
+      showToast('Entidade injetada com sucesso no ficheiro .bz2!');
+      e.target.reset();
+    } else {
+      showToast('Erro: ' + (d.error || 'Falha na inserção'), true);
+    }
+  } catch(err) {
+    showToast('Erro de comunicação com o servidor.', true);
+  } finally {
+    btn.textContent = '💾 Injetar no Ficheiro .bz2';
+    btn.disabled = false;
+  }
+}
+// --- Lógica de Extração PDF ---
+async function extractFromPDF() {
+  const fileInput = document.getElementById('pdf-upload');
+  const file = fileInput.files[0];
+  
+  if (!file) {
+    showToast('Por favor, seleciona um ficheiro PDF primeiro.', true);
+    return;
+  }
+
+  const btn = document.getElementById('btn-extract-pdf');
+  const feedback = document.getElementById('pdf-feedback');
+  
+  btn.textContent = 'A processar...';
+  btn.disabled = true;
+  feedback.textContent = 'A analisar texto do documento...';
+  feedback.style.color = 'var(--cinza3)';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/extract-pdf', {
+      method: 'POST',
+      body: formData // Não uses JSON.stringify nem 'Content-Type' headers ao enviar ficheiros
+    });
+
+    const data = await res.json();
+    
+    if (data.ok) {
+      // Injetar nos campos do formulário se a IA/script tiver encontrado
+      if (data.data_publicacao) {
+        document.querySelector('input[name="data_publicacao"]').value = data.data_publicacao;
+      }
+      if (data.sumario) {
+        document.querySelector('textarea[name="sumario"]').value = data.sumario;
+      }
+      if (data.emitido_por_nome) {
+        document.querySelector('input[name="emitido_por_nome"]').value = data.emitido_por_nome;
+      }
+
+      showToast('Dados do PDF extraídos com sucesso!');
+      feedback.textContent = 'Campos preenchidos automaticamente. Por favor, valida a informação.';
+      feedback.style.color = 'var(--verde2)';
+    } else {
+      showToast(data.error || 'Erro na extração', true);
+      feedback.textContent = 'Erro ao extrair dados. Preenche manualmente.';
+      feedback.style.color = 'var(--vermelho)';
+    }
+  } catch (err) {
+    showToast('Erro de comunicação com o servidor ao processar PDF.', true);
+    feedback.textContent = 'Falha na ligação.';
+  } finally {
+    btn.textContent = 'Extrair Dados';
+    btn.disabled = false;
+  }
 }

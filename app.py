@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""
-app.py — Aplicação Web DRE Ontologia
-Exploração, consulta e enrichment da ontologia do Diário da República.
-
-Instalar dependências:
-    pip install flask
-
-Executar:
-    python3 app.py --db dre.db [--port 5000]
-"""
-
+import bz2
+import os
+import tempfile
+import shutil
+import urllib.parse
+from rdflib import Graph, URIRef, Literal, Namespace
+from rdflib.namespace import RDF, RDFS, XSD
 import sqlite3
 import argparse
 import json
 import math
+import PyPDF2
 from datetime import datetime
 from pathlib import Path
 from flask import (
@@ -21,6 +18,7 @@ from flask import (
 )
 import unicodedata
 import re
+
 
 app = Flask(__name__)
 DB_PATH = "dre.db"
@@ -67,7 +65,6 @@ def close_db(exc=None):
 def index():
   return render_template('index.html')
 
-
 @app.route("/api/search")
 def api_search():
     db = get_db()
@@ -82,11 +79,66 @@ def api_search():
     page = max(1, int(request.args.get("page", 1)))
     per_page = int(request.args.get("per_page", PER_PAGE))
 
+    entity_classes = {
+        'dre:EntidadeEmissora', 'dre:OrgaoSoberano', 'dre:Ministerio', 
+        'dre:EntidadeLocal', 'dre:EntidadeRegional', 'dre:EntidadePublicaEmpresarial', 'dre:Tribunal'
+    }
+
+    # --- 1. PESQUISA DE ENTIDADES (Para aparecerem mesmo sem documentos emitidos) ---
+    entidades_results = []
+    # Só pesquisa entidades se não estivermos a usar filtros exclusivos de documentos (datas, vigor, etc.)
+    if not (categoria or serie or vigor != "" or ano_ini or ano_fim):
+        ent_conds, ent_params = [], []
+        if q:
+            ent_conds.append("nome LIKE ?")
+            ent_params.append(f"%{q}%")
+        if entidade:
+            ent_conds.append("nome LIKE ?")
+            ent_params.append(f"%{entidade}%")
+        if owl_class:
+            if owl_class in entity_classes:
+                ent_conds.append("tipo = ?")
+                ent_params.append(owl_class)
+            else:
+                ent_conds.append("1 = 0") # Se filtrou por "Lei", não mostra entidades
+
+        ent_where = "WHERE " + " AND ".join(ent_conds) if ent_conds else ""
+        ents = db.execute(f"SELECT id, nome, tipo FROM entidade_emissora {ent_where} LIMIT 20", ent_params).fetchall()
+        
+        for e in ents:
+            entidades_results.append({
+                "id": e["id"],
+                "claint": "—",
+                "doc_type": "Entidade",
+                "owl_class": e["tipo"] or "dre:EntidadeEmissora",
+                "categoria": "Entidade",
+                "numero": "—",
+                "dr_number": "—",
+                "serie": "—",
+                "data": "—",
+                "sumario": e["nome"],
+                "in_force": 1,
+                "url_pdf": "",
+                "is_entity": True # Flag crucial para o frontend
+            })
+
+    # --- 2. PESQUISA DE DOCUMENTOS NORMAL ---
     conds, params = [], []
 
     if owl_class:
-        conds.append("d.owl_class = ?")
-        params.append(owl_class)
+        if owl_class in entity_classes:
+            conds.append("""
+                EXISTS (
+                    SELECT 1 FROM documento_entidade de
+                    JOIN entidade_emissora e ON e.id = de.entidade_id
+                    WHERE de.doc_id = d.id AND e.tipo = ?
+                )
+            """)
+            params.append(owl_class)
+        else:
+            conds.append("d.owl_class = ?")
+            params.append(owl_class)
+
     if categoria:
         conds.append("d.categoria = ?")
         params.append(categoria)
@@ -113,39 +165,205 @@ def api_search():
         params.append(f"%{entidade}%")
 
     if q:
-        fts_ids = db.execute(
-            "SELECT rowid FROM documento_fts WHERE documento_fts MATCH ? LIMIT 5000",
-            (q + "*",)
-        ).fetchall()
+        fts_ids = db.execute("SELECT rowid FROM documento_fts WHERE documento_fts MATCH ? LIMIT 5000", (q + "*",)).fetchall()
         if fts_ids:
             id_list = ",".join(str(r[0]) for r in fts_ids)
             conds.append(f"d.id IN ({id_list})")
         else:
-            return jsonify({"results": [], "total": 0, "page": page, "pages": 0})
+            conds.append("1 = 0")
 
     where = "WHERE " + " AND ".join(conds) if conds else ""
-
-    total_row = db.execute(
-        f"SELECT COUNT(*) FROM documento d {where}", params
-    ).fetchone()
-    total = total_row[0] if total_row else 0
+    
+    if "1 = 0" in conds and not entidades_results:
+        return jsonify({"results": [], "total": 0, "page": page, "pages": 0})
+        
+    total_row = db.execute(f"SELECT COUNT(*) FROM documento d {where}", params).fetchone()
+    total_docs = total_row[0] if total_row else 0
 
     offset = (page - 1) * per_page
-    rows = db.execute(f"""
-        SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
-               d.numero, d.dr_number, d.serie, d.data, d.sumario,
-               d.in_force, d.url_pdf
-        FROM documento d
-        {where}
-        ORDER BY d.data DESC
-        LIMIT ? OFFSET ?
-    """, params + [per_page, offset]).fetchall()
+    docs_to_fetch = per_page
+    
+    if page == 1 and entidades_results:
+        docs_to_fetch = max(0, per_page - len(entidades_results))
+        
+    rows = []
+    if docs_to_fetch > 0 and "1 = 0" not in conds:
+        rows = db.execute(f"""
+            SELECT d.id, d.claint, d.doc_type, d.owl_class, d.categoria,
+                   d.numero, d.dr_number, d.serie, d.data, d.sumario,
+                   d.in_force, d.url_pdf
+            FROM documento d
+            {where}
+            ORDER BY d.data DESC
+            LIMIT ? OFFSET ?
+        """, params + [docs_to_fetch, offset]).fetchall()
 
-    results = [dict(r) for r in rows]
-    pages = math.ceil(total / per_page) if per_page else 1
+    results = entidades_results if page == 1 else []
+    results.extend([dict(r) for r in rows])
+    
+    total_all = total_docs + len(entidades_results)
+    pages = math.ceil(total_all / per_page) if per_page else 1
 
-    return jsonify({"results": results, "total": total, "page": page, "pages": pages})
+    return jsonify({"results": results, "total": total_all, "page": page, "pages": pages})
 
+@app.route("/api/rdf/entidade", methods=["POST"])
+def api_add_rdf_entidade():
+    """Injeta um novo triplo semântico no .ttl E sincroniza com o SQLite com o tipo correto"""
+    body = request.get_json()
+    nome = body.get("nome", "").strip()
+    tipo_uri = body.get("tipo_uri", "").strip()
+
+    if not nome or not tipo_uri:
+        return jsonify({"ok": False, "error": "Nome e Tipo da Entidade são obrigatórios."}), 400
+
+    try:
+        # Normaliza a classe para o formato curto do SQLite (ex: dre:Ministerio)
+        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "dre:")
+
+        # 1. ESCRITA NO SQLITE (Garante tipagem correta para os contadores e filtros)
+        db = get_db()
+        db.execute("INSERT INTO entidade_nova (nome, tipo) VALUES (?, ?)", (nome, owl_class_db))
+        db.execute("""
+            INSERT INTO entidade_emissora (nome, tipo) VALUES (?, ?)
+            ON CONFLICT(nome) DO UPDATE SET tipo=?
+        """, (nome, owl_class_db, owl_class_db))
+        db.commit()
+
+        # 2. ESCRITA NO GRAFO RDF (.ttl)
+        g = Graph()
+        with open(RDF_FILE, "r", encoding="utf-8") as f:
+            g.parse(f, format="turtle")
+            
+        safe_name = urllib.parse.quote(nome.replace(" ", "_"))
+        nova_entidade_uri = DRE_NS[safe_name]
+        
+        g.add((nova_entidade_uri, RDF.type, URIRef(tipo_uri)))
+        g.add((nova_entidade_uri, DRE_NS.nome, Literal(nome)))
+
+        fd, temp_path = tempfile.mkstemp(suffix=".ttl")
+        os.close(fd) 
+        
+        with open(temp_path, "wb") as f_out:
+            g.serialize(destination=f_out, format="turtle")
+            
+        shutil.move(temp_path, RDF_FILE)
+        return jsonify({"ok": True, "uri": str(nova_entidade_uri)})
+
+    except Exception as e:
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"ok": False, "error": f"Erro interno: {str(e)}"}), 500
+
+
+@app.route("/api/rdf/documento", methods=["POST"])
+def api_add_rdf_documento():
+    """Gera e injeta os triplos no .ttl E guarda no SQLite com tratamento para NameError"""
+    body = request.get_json()
+    
+    # Secção A - RESOLUÇÃO DO NameError: Garantir recolha de todas as variáveis
+    tipo_uri = body.get("tipo_uri", "").strip()
+    numero = body.get("numero", "").strip()
+    data_pub = body.get("data_publicacao", "").strip()
+    sumario = body.get("sumario", "").strip()
+    dr_number = body.get("dr_number", "").strip()
+    url_pdf = body.get("url_pdf", "").strip()
+    
+    # Secção B
+    nome_entidade = body.get("emitido_por_nome", "").strip()
+    label_documento = body.get("revoga_label", "").strip()
+    assuntos = [a.strip() for a in body.get("assunto", "").split(",") if a.strip()]
+
+    if not tipo_uri or not numero or not data_pub:
+        return jsonify({"ok": False, "error": "Tipo, número e data são obrigatórios."}), 400
+
+    try:
+        db = get_db()
+        
+        # CORREÇÃO DA DUPLICAÇÃO: Converte a URI para o prefixo dre: esperado pelo SQLite
+        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "dre:")
+        doc_type_short = tipo_uri.split("#")[-1] if "#" in tipo_uri else tipo_uri.split(":")[-1]
+        
+        # Extrair ano para consistência do dump original
+        ano = int(data_pub[:4]) if data_pub and len(data_pub) >= 4 else None
+
+        # 1. SALVAR NO SQLITE
+        cur = db.execute("""
+            INSERT INTO documento (doc_type, owl_class, numero, dr_number, data, ano, sumario, entidades, url_pdf, timestamp, in_force)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)
+        """, (doc_type_short, owl_class_db, numero, dr_number, data_pub, ano, sumario, nome_entidade, url_pdf))
+        
+        rowid = cur.lastrowid
+        
+        db.execute("""
+            INSERT INTO documento_novo (doc_type, owl_class, numero, data, sumario, entidades, url_pdf)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (doc_type_short, owl_class_db, numero, data_pub, sumario, nome_entidade, url_pdf))
+        
+        db.execute("""
+            INSERT INTO documento_fts(rowid, claint, doc_type, numero, sumario, entidades) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (rowid, None, doc_type_short, numero, sumario, nome_entidade))
+        
+        if nome_entidade:
+            db.execute("INSERT OR IGNORE INTO entidade_emissora(nome) VALUES (?)", (nome_entidade,))
+            eid_row = db.execute("SELECT id FROM entidade_emissora WHERE nome=?", (nome_entidade,)).fetchone()
+            if eid_row:
+                db.execute("INSERT OR IGNORE INTO documento_entidade(doc_id, entidade_id) VALUES (?,?)", (rowid, eid_row[0]))
+                
+        db.commit()
+
+        # 2. SALVAR NO FICHEIRO GRAPH RDF (.ttl)
+        g = Graph()
+        with open(RDF_FILE, "r", encoding="utf-8") as f:
+            g.parse(f, format="turtle")
+            
+        safe_num = urllib.parse.quote(numero.replace("/", "_").replace(" ", ""))
+        doc_uri = DRE_NS[f"Doc_{safe_num}_{data_pub.replace('-','')}"]
+        
+        g.add((doc_uri, RDF.type, URIRef(tipo_uri)))
+        g.add((doc_uri, DRE_NS.numero, Literal(numero, datatype=XSD.string)))
+        g.add((doc_uri, DRE_NS.dataPublicacao, Literal(data_pub, datatype=XSD.date)))
+        if sumario:
+            g.add((doc_uri, DRE_NS.sumario, Literal(sumario, datatype=XSD.string)))
+        if dr_number:
+            g.add((doc_uri, DRE_NS.numeroDR, Literal(dr_number, datatype=XSD.string)))
+        if url_pdf:
+            g.add((doc_uri, DRE_NS.urlPDF, Literal(url_pdf, datatype=XSD.anyURI)))
+
+        if nome_entidade:
+            safe_ent = urllib.parse.quote(nome_entidade.replace(" ", "_"))
+            g.add((doc_uri, DRE_NS.emitidoPor, DRE_NS[safe_ent]))
+            g.add((DRE_NS[safe_ent], DRE_NS.emitiu, doc_uri))
+            
+        if label_documento and "nº" in label_documento:
+            try:
+                partes = label_documento.split(" nº ")
+                num_antigo = partes[1].split(" ")[0]
+                data_antiga = partes[1].split("(")[1].replace(")", "").strip()
+                safe_num_antigo = urllib.parse.quote(num_antigo.replace("/", "_").replace(" ", ""))
+                old_doc_uri = DRE_NS[f"Doc_{safe_num_antigo}_{data_antiga.replace('-','')}"]
+                
+                g.add((doc_uri, DRE_NS.revoga, old_doc_uri))
+                g.add((old_doc_uri, DRE_NS.revogadoPor, doc_uri))
+            except Exception:
+                pass
+
+        for assunto in assuntos:
+            g.add((doc_uri, DRE_NS.tema, Literal(assunto, datatype=XSD.string)))
+
+        fd, temp_path = tempfile.mkstemp(suffix=".ttl")
+        os.close(fd) 
+        
+        with open(temp_path, "wb") as f_out:
+            g.serialize(destination=f_out, format="turtle")
+            
+        shutil.move(temp_path, RDF_FILE)
+        return jsonify({"ok": True, "uri": str(doc_uri)})
+
+    except Exception as e:
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"ok": False, "error": f"Erro interno: {str(e)}"}), 500
 
 @app.route("/api/documento/<int:doc_id>")
 def api_documento(doc_id):
@@ -447,11 +665,99 @@ def api_unlink_document(ent_id, doc_id):
 @app.route("/api/owl-classes")
 def api_owl_classes():
     db = get_db()
-    rows = db.execute("""
-        SELECT owl_class, COUNT(*) as count FROM documento
-        GROUP BY owl_class ORDER BY count DESC
+    
+    # 1. Conta as classes dos Documentos
+    rows_docs = db.execute("""
+        SELECT owl_class, COUNT(*) as count FROM documento 
+        WHERE owl_class IS NOT NULL GROUP BY owl_class
     """).fetchall()
-    return jsonify([dict(r) for r in rows])
+    
+    # 2. Conta as classes das Novas Entidades
+    rows_ents = db.execute("""
+        SELECT tipo as owl_class, COUNT(*) as count FROM entidade_nova 
+        WHERE tipo IS NOT NULL GROUP BY tipo
+    """).fetchall()
+    
+    counts = {}
+    for r in rows_docs:
+        counts[r["owl_class"]] = counts.get(r["owl_class"], 0) + r["count"]
+        
+    for r in rows_ents:
+        # Garante que agrupa corretamente convertendo http://... para dre:
+        cls = r["owl_class"].replace("http://dre.pt/ontology#", "dre:")
+        counts[cls] = counts.get(cls, 0) + r["count"]
+        
+    # 3. Conta as Entidades Emissoras base do Dump (que por defeito são dre:EntidadeEmissora)
+    base_ents = db.execute("SELECT COUNT(*) FROM entidade_emissora").fetchone()[0]
+    if base_ents > 0:
+        counts["dre:EntidadeEmissora"] = counts.get("dre:EntidadeEmissora", 0) + base_ents
+        
+    result = [{"owl_class": k, "count": v} for k, v in counts.items()]
+    # Ordenar pelos que têm mais contagem
+    result.sort(key=lambda x: x["count"], reverse=True)
+    return jsonify(result)
+
+
+@app.route("/api/owl-classes-all")
+def api_owl_classes_all():
+    """Retorna todas as classes OWL disponíveis com rótulos legíveis para a ontologia e entidades."""
+    # Classes da ontologia principais com rótulos legíveis
+    ontology_classes = {
+        # Classes raiz
+        'dre:DocumentoOficial': 'Documento Oficial',
+        'dre:EntidadeEmissora': 'Entidade Emissora',
+        # Subclasses de EntidadeEmissora
+        'dre:OrgaoSoberano': 'Órgão de Soberania',
+        'dre:Ministerio': 'Ministério',
+        'dre:EntidadeLocal': 'Entidade Local',
+        'dre:EntidadeRegional': 'Entidade Regional',
+        'dre:EntidadePublicaEmpresarial': 'Entidade Pública Empresarial',
+        'dre:Tribunal': 'Tribunal',
+        # Atos Normativos
+        'dre:AtoNormativo': 'Ato Normativo',
+        'dre:Lei': 'Lei',
+        'dre:LeiOrganica': 'Lei Orgânica',
+        'dre:DecretoLei': 'Decreto-Lei',
+        'dre:Decreto': 'Decreto',
+        'dre:DecretoRegulamentar': 'Decreto Regulamentar',
+        'dre:Portaria': 'Portaria',
+        'dre:Regulamento': 'Regulamento',
+        'dre:Resolucao': 'Resolução',
+        'dre:Rectificacao': 'Rectificação',
+        # Atos Administrativos
+        'dre:AtoAdministrativo': 'Ato Administrativo',
+        'dre:Despacho': 'Despacho',
+        'dre:DespachoExtrato': 'Despacho (extrato)',
+        'dre:Deliberacao': 'Deliberação',
+        'dre:Contrato': 'Contrato',
+        'dre:Louvor': 'Louvor',
+        'dre:Declaracao': 'Declaração',
+        # Atos Informativos
+        'dre:AtoInformativo': 'Ato Informativo',
+        'dre:Aviso': 'Aviso',
+        'dre:AvisoExtrato': 'Aviso (extrato)',
+        'dre:AvisoContumax': 'Aviso de Contumácia',
+        'dre:AnuncioProcedimento': 'Anúncio de Procedimento',
+        'dre:Anuncio': 'Anúncio',
+        'dre:Edital': 'Edital',
+    }
+    
+    # Adicionar classes usadas em documentos que não estão na lista acima
+    db = get_db()
+    used_classes = db.execute("""
+        SELECT DISTINCT owl_class FROM documento WHERE owl_class IS NOT NULL
+    """).fetchall()
+    
+    for row in used_classes:
+        cls = row[0]
+        if cls and cls not in ontology_classes:
+            # Gerar rótulo a partir da classe (remover 'dre:')
+            label = cls.replace('dre:', '')
+            ontology_classes[cls] = label
+    
+    # Converter para lista com estrutura esperada
+    result = [{"cls": k, "label": v} for k, v in sorted(ontology_classes.items())]
+    return jsonify(result)
 
 
 @app.route("/api/quickstats")
@@ -575,6 +881,153 @@ def api_get_documento_novo(doc_id):
         return jsonify({'error': 'Não encontrado'}), 404
     return jsonify(dict(row))
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Integração Direta com Ficheiro RDF (.bz2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+RDF_FILE = "dre_ontologia.ttl"
+DRE_NS = Namespace("http://dre.pt/ontology#")
+
+
+
+@app.route("/api/extract-pdf", methods=["POST"])
+def api_extract_pdf():
+    """Lê um PDF, extrai texto e tenta adivinhar metadados."""
+    if 'file' not in request.files:
+        return jsonify({"error": "Nenhum ficheiro enviado."}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Nenhum ficheiro selecionado."}), 400
+
+    try:
+        reader = PyPDF2.PdfReader(file)
+        text = ""
+        # Extrair texto das primeiras 3 páginas (geralmente chega para sumário, data e entidade)
+        for i in range(min(3, len(reader.pages))):
+            extracted = reader.pages[i].extract_text()
+            if extracted:
+                text += extracted + "\n"
+
+        # Lógica Simples de "IA" / Regex para pré-preencher
+        # 1. Adivinhar Data (ex: 14 de maio de 2026)
+        data_encontrada = ""
+        match_data = re.search(r'(\d{1,2})\s+de\s+([a-zA-Zçço]+)\s+de\s+(\d{4})', text, re.IGNORECASE)
+        if match_data:
+            meses = {"janeiro":"01", "fevereiro":"02", "março":"03", "abril":"04", "maio":"05", "junho":"06",
+                     "julho":"07", "agosto":"08", "setembro":"09", "outubro":"10", "novembro":"11", "dezembro":"12"}
+            dia = match_data.group(1).zfill(2)
+            mes_str = match_data.group(2).lower()
+            ano = match_data.group(3)
+            mes = meses.get(mes_str, "01")
+            data_encontrada = f"{ano}-{mes}-{dia}"
+
+        # 2. Adivinhar Sumário
+        sumario = ""
+        # Procura a palavra "Sumário:" e captura até à quebra de linha dupla
+        match_sumario = re.search(r'Sumário:\s*(.*?)(?:\n\n|\Z)', text, re.IGNORECASE | re.DOTALL)
+        if match_sumario:
+            sumario = match_sumario.group(1).strip().replace('\n', ' ')
+        else:
+            # Fallback: se não tiver a palavra Sumário, pega nos primeiros 200 caracteres de texto limpo
+            texto_limpo = re.sub(r'\s+', ' ', text).strip()
+            sumario = texto_limpo[:200] + "..." if len(texto_limpo) > 200 else texto_limpo
+
+        # 3. Adivinhar Entidade Emissora (cruzar texto com SQLite)
+        db = get_db()
+        entidades_bd = db.execute("SELECT nome FROM entidade_emissora").fetchall()
+        entidade_sugerida = ""
+        for r in entidades_bd:
+            # Se o nome exato da entidade existir no texto do PDF, sugere-a
+            if r["nome"].lower() in text.lower():
+                entidade_sugerida = r["nome"]
+                break
+
+        return jsonify({
+            "ok": True,
+            "data_publicacao": data_encontrada,
+            "sumario": sumario,
+            "emitido_por_nome": entidade_sugerida
+        })
+    except Exception as e:
+        return jsonify({"error": f"Erro ao processar o PDF: {str(e)}"}), 500
+
+@app.route("/api/rdf/classes", methods=["GET"])
+def api_rdf_classes_fast():
+    """Devolve as classes de entidades usando o SQLite e o mapa já existente."""
+    try:
+        # Aproveitamos as classes que já tens mapeadas no teu app.py original
+        classes_entidade = [
+            {"uri": "http://dre.pt/ontology#EntidadeEmissora", "label": "Entidade Emissora"},
+            {"uri": "http://dre.pt/ontology#OrgaoSoberano", "label": "Órgão de Soberania"},
+            {"uri": "http://dre.pt/ontology#Ministerio", "label": "Ministério"},
+            {"uri": "http://dre.pt/ontology#EntidadeLocal", "label": "Entidade Local"},
+            {"uri": "http://dre.pt/ontology#EntidadeRegional", "label": "Entidade Regional"},
+            {"uri": "http://dre.pt/ontology#EntidadePublicaEmpresarial", "label": "Entidade Pública Empresarial"},
+            {"uri": "http://dre.pt/ontology#Tribunal", "label": "Tribunal"}
+        ]
+        return jsonify(classes_entidade)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rdf/form-options", methods=["GET"])
+def api_rdf_form_options_fast():
+    """Usa o SQLite para popular os dropdowns de Documentos instantaneamente."""
+    try:
+        db = get_db()
+        
+        # 1. Classes de Documentos (Mapeamento direto, super rápido)
+        classes_doc = [
+            {"uri": "http://dre.pt/ontology#Lei", "label": "Lei"},
+            {"uri": "http://dre.pt/ontology#DecretoLei", "label": "Decreto-Lei"},
+            {"uri": "http://dre.pt/ontology#Decreto", "label": "Decreto"},
+            {"uri": "http://dre.pt/ontology#Portaria", "label": "Portaria"},
+            {"uri": "http://dre.pt/ontology#Despacho", "label": "Despacho"},
+            {"uri": "http://dre.pt/ontology#Resolucao", "label": "Resolução"},
+            {"uri": "http://dre.pt/ontology#Aviso", "label": "Aviso"}
+        ]
+
+        # 2. Entidades Emissoras do SQLite
+        linhas_entidades = db.execute("SELECT nome FROM entidade_emissora ORDER BY nome").fetchall()
+        entidades = []
+        for r in linhas_entidades:
+            nome = r["nome"]
+            # Constrói a URI a partir do nome para ser injetada no RDF depois
+            safe_name = urllib.parse.quote(nome.replace(" ", "_"))
+            entidades.append({
+                "uri": f"http://dre.pt/ontology#{safe_name}",
+                "label": nome
+            })
+
+        # 3. Documentos Recentes do SQLite (Limitado aos últimos 1000 para não encravar o browser)
+        linhas_docs = db.execute("""
+            SELECT doc_type, numero, data 
+            FROM documento 
+            WHERE numero IS NOT NULL AND data IS NOT NULL
+            ORDER BY data DESC LIMIT 1000
+        """).fetchall()
+        
+        documentos = []
+        for r in linhas_docs:
+            tipo = r["doc_type"] or "Doc"
+            num = r["numero"]
+            data_pub = r["data"]
+            # Constrói a mesma URI lógica que usas para inserção
+            safe_num = urllib.parse.quote(num.replace("/", "_").replace(" ", ""))
+            doc_uri = f"http://dre.pt/ontology#Doc_{safe_num}_{data_pub.replace('-','')}"
+            documentos.append({
+                "uri": doc_uri,
+                "label": f"{tipo.capitalize()} nº {num} ({data_pub})"
+            })
+
+        return jsonify({
+            "classes_doc": classes_doc,
+            "entidades": entidades,
+            "documentos": documentos
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
