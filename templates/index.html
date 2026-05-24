@@ -19,7 +19,13 @@
     <nav>
       <button class="active" onclick="showView('pesquisa', this)">🔍 Pesquisa</button>
       <button onclick="showView('ontologia', this)">🌳 Ontologia</button>
-      <button onclick="showView('adicionar', this)">➕ Adicionar</button>
+      <div class="nav-dropdown" id="addDropdownContainer">
+        <button onclick="toggleAddDropdown(event)">➕ Adicionar ▾</button>
+        <div class="nav-dropdown-content" id="addDropdownMenu">
+          <a href="#" onclick="openAddView('documento', event)">Inserir Documento</a>
+          <a href="#" onclick="openAddView('entidade', event)">Inserir Entidade</a>
+        </div>
+      </div>
       <button onclick="showView('estatisticas', this)">📊 Estatísticas</button>
     </nav>
   </div>
@@ -124,34 +130,8 @@
     <div class="view" id="view-ontologia">
       <div class="panel">
         <h3>Hierarquia de Classes</h3>
-        <div class="onto-tree">
-          <div class="level0">🌳 dre:DocumentoOficial</div>
-          <div class="level1">├─ dre:AtoNormativo</div>
-          <div class="level2">│  ├─ dre:Lei</div>
-          <div class="level3">│  │  └─ dre:LeiOrganica</div>
-          <div class="level2">│  ├─ dre:DecretoLei</div>
-          <div class="level2">│  ├─ dre:Decreto</div>
-          <div class="level3">│  │  └─ dre:DecretoRegulamentar</div>
-          <div class="level2">│  ├─ dre:Portaria</div>
-          <div class="level2">│  ├─ dre:Regulamento</div>
-          <div class="level2">│  ├─ dre:Resolucao</div>
-          <div class="level2">│  └─ dre:Rectificacao</div>
-          <div class="level1">├─ dre:AtoAdministrativo</div>
-          <div class="level2">│  ├─ dre:Despacho</div>
-          <div class="level3">│  │  └─ dre:DespachoExtrato</div>
-          <div class="level2">│  ├─ dre:Deliberacao</div>
-          <div class="level2">│  ├─ dre:Contrato</div>
-          <div class="level2">│  ├─ dre:Louvor</div>
-          <div class="level2">│  └─ dre:Declaracao</div>
-          <div class="level1">└─ dre:AtoInformativo</div>
-          <div class="level2">   ├─ dre:Aviso</div>
-          <div class="level3">   │  └─ dre:AvisoExtrato</div>
-          <div class="level2">   ├─ dre:AvisoContumax</div>
-          <div class="level2">   ├─ dre:AnuncioProcedimento</div>
-          <div class="level2">   ├─ dre:Anuncio</div>
-          <div class="level2">   └─ dre:Edital</div>
-          <!-- Classes personalizadas adicionadas pelo utilizador -->
-          <div id="custom-owl-classes-tree"></div>
+        <div class="onto-tree" id="ontology-tree">
+          <div style="color:var(--cinza3);font-size:.8rem;padding:1rem">A carregar hierarquia...</div>
         </div>
       </div>
 
@@ -193,152 +173,109 @@
       </div>
     </div>
 
-    <!-- ADICIONAR -->
+
     <div class="view" id="view-adicionar">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">
-        <!-- Novo Documento -->
-        <div class="panel">
-          <h3>➕ Novo Documento</h3>
-          <form class="add-form" onsubmit="addDocument(event)">
-            <div class="form-group">
-              <label>Tipo de Documento (Classe OWL)</label>
-              <select name="owl_class" required>
-                <option value="">— selecionar —</option>
-                <optgroup label="Atos Normativos">
-                  <option value="dre:Lei">dre:Lei — Lei</option>
-                  <option value="dre:DecretoLei">dre:DecretoLei — Decreto-Lei</option>
-                  <option value="dre:Decreto">dre:Decreto — Decreto</option>
-                  <option value="dre:Portaria">dre:Portaria — Portaria</option>
-                  <option value="dre:Regulamento">dre:Regulamento — Regulamento</option>
-                  <option value="dre:Resolucao">dre:Resolucao — Resolução</option>
-                  <option value="dre:Rectificacao">dre:Rectificacao — Retificação</option>
-                </optgroup>
-                <optgroup label="Atos Administrativos">
-                  <option value="dre:Despacho">dre:Despacho — Despacho</option>
-                  <option value="dre:Deliberacao">dre:Deliberacao — Deliberação</option>
-                  <option value="dre:Contrato">dre:Contrato — Contrato</option>
-                  <option value="dre:Louvor">dre:Louvor — Louvor</option>
-                  <option value="dre:Declaracao">dre:Declaracao — Declaração</option>
-                </optgroup>
-                <optgroup label="Atos Informativos">
-                  <option value="dre:Aviso">dre:Aviso — Aviso</option>
-                  <option value="dre:AnuncioProcedimento">dre:AnuncioProcedimento — Anúncio de Procedimento</option>
-                  <option value="dre:Anuncio">dre:Anuncio — Anúncio</option>
-                  <option value="dre:Edital">dre:Edital — Edital</option>
-                </optgroup>
-              </select>
+      <div style="display:grid;grid-template-columns:1fr;gap:1.25rem">
+        
+        
+      <div class="panel" id="panel-add-doc" style="display: none;">
+        <h3>📄 Inserir Novo Documento (Grafo RDF)</h3>
+        <p style="font-size:0.85rem;color:var(--cinza3);margin-bottom:1rem;">O documento será traduzido em triplos e injetado diretamente na ontologia.</p>
+        
+        <form class="add-form" onsubmit="addRDFDocument(event)">
+          
+          <!-- SECÇÃO A: Data Properties -->
+          <h4 class="form-section-title">Secção A: Identificação do Documento</h4>
+          
+          <div class="form-group" style="background: #f4f6f8; padding: 1rem; border-radius: 4px; border: 1px dashed var(--cinza2); margin-bottom: 1.25rem;">
+            <label style="color: var(--verde2); font-weight: 500; font-size: 0.9rem;">🤖 Preenchimento Automático via PDF</label>
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+              <input type="file" id="pdf-upload" accept=".pdf" style="flex: 1; padding: 0.25rem;">
+              <button type="button" class="btn btn-secondary" onclick="extractFromPDF()" id="btn-extract-pdf">Extrair Dados</button>
             </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Número do Documento</label>
-                <input type="text" name="numero" placeholder="ex: 123/2024">
-              </div>
-              <div class="form-group">
-                <label>Data de Publicação</label>
-                <input type="date" name="data">
-              </div>
+            <div id="pdf-feedback" style="font-size: 0.75rem; color: var(--cinza3); margin-top: 0.5rem;">Carrega um PDF oficial do DR para preencher os campos abaixo.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Tipo de Documento (Classe OWL)</label>
+            <select id="rdf-doc-type" name="tipo_uri" required>
+              <option value="">A carregar tipos de documento...</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Número do Documento</label>
+              <input type="text" name="numero" placeholder="ex: 12-A/2026" required>
             </div>
             <div class="form-group">
-              <label>Sumário / Ementa</label>
-              <textarea name="sumario" placeholder="Descrição sumária do documento..." required></textarea>
+              <label>Data de Publicação</label>
+              <input type="date" name="data_publicacao" required>
             </div>
+          </div>
+
+          <div class="form-row">
             <div class="form-group">
-              <label>Entidades Emissoras (separadas por vírgula)</label>
-              <input type="text" name="entidades" placeholder="ex: Ministério da Saúde, Presidência da República">
-            </div>
-            <div class="form-group">
-              <label>Fonte / Referência</label>
-              <input type="text" name="fonte" placeholder="ex: DR 1.ª Série n.º 50/2024">
+              <label>Série / Número do DR</label>
+              <input type="text" name="dr_number" placeholder="ex: 100/2026">
             </div>
             <div class="form-group">
               <label>URL do PDF</label>
-              <input type="text" name="url_pdf" placeholder="https://dre.pt/...">
+              <input type="url" name="url_pdf" placeholder="https://diariodarepublica.pt/...">
             </div>
-            <button type="submit" class="btn btn-primary" style="width:100%">💾 Guardar Documento</button>
-          </form>
-        </div>
-
-        <!-- Nova Entidade -->
-        <div class="panel">
-          <h3>🏛️ Nova Entidade Emissora</h3>
-          <form class="add-form" onsubmit="addEntity(event)">
-            <div class="form-group">
-              <label>Nome da Entidade</label>
-              <input type="text" name="nome" placeholder="ex: Autoridade Nacional de Comunicações" required>
-            </div>
-
-            <!-- Bloco de definição de classe OWL personalizada -->
-            <div class="form-group">
-              <label>Classe OWL</label>
-              <div style="background:var(--cinza1);border:1.5px solid var(--cinza2);border-radius:6px;padding:.75rem 1rem;font-family:var(--mono);font-size:.82rem;line-height:2">
-                <div style="color:var(--cinza3);font-size:.7rem;margin-bottom:.4rem;font-family:var(--sans);letter-spacing:.04em;text-transform:uppercase">Definição OWL Turtle (preencha os campos)</div>
-
-                <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.3rem">
-                  <span style="color:var(--verde2);font-weight:600">dre:</span><input
-                    id="owl-class-localname"
-                    name="owl_class_localname"
-                    type="text"
-                    placeholder="NomeClasse"
-                    required
-                    oninput="updateOwlPreview()"
-                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;width:180px;outline:none;padding:.1rem .2rem;color:var(--preto)">
-                  <span style="color:var(--cinza3)">a</span>
-                  <span style="color:#2a5a8a">owl:Class</span>
-                  <span style="color:var(--cinza3)">;</span>
-                </div>
-
-                <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.3rem;padding-left:1.5rem">
-                  <span style="color:#7a5a00">rdfs:subClassOf</span>
-                  <span style="color:var(--verde2);font-weight:600">dre:</span><input
-                    id="owl-class-parent"
-                    name="owl_class_parent"
-                    type="text"
-                    placeholder="EntidadeEmissora"
-                    oninput="updateOwlPreview()"
-                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;width:180px;outline:none;padding:.1rem .2rem;color:var(--preto)">
-                  <span style="color:var(--cinza3)">;</span>
-                </div>
-
-                <div style="display:flex;align-items:flex-start;gap:.4rem;flex-wrap:wrap;padding-left:1.5rem">
-                  <span style="color:#7a5a00;white-space:nowrap">rdfs:label</span>
-                  <span style="color:#8B0000">"</span><input
-                    id="owl-class-label"
-                    name="owl_class_label"
-                    type="text"
-                    placeholder="Rótulo legível"
-                    oninput="updateOwlPreview()"
-                    style="border:none;border-bottom:1.5px solid var(--ouro);background:transparent;font-family:var(--mono);font-size:.82rem;flex:1;min-width:120px;outline:none;padding:.1rem .2rem;color:var(--preto)"><span style="color:#8B0000">"@pt</span>
-                  <span style="color:var(--cinza3)">.</span>
-                </div>
-              </div>
-
-              <!-- Pré-visualização da classe gerada -->
-              <div id="owl-preview" style="margin-top:.5rem;padding:.4rem .7rem;background:#f0f7f0;border-left:3px solid var(--verde);border-radius:0 4px 4px 0;font-family:var(--mono);font-size:.72rem;color:var(--verde2);display:none"></div>
-
-              <!-- Campo hidden que recebe o valor final dre:NomeClasse -->
-              <input type="hidden" name="tipo" id="owl-class-final" value="dre:EntidadeEmissora">
-            </div>
-
-            <div class="form-group">
-              <label>Descrição</label>
-              <textarea name="descricao" placeholder="Breve descrição da entidade e da sua função..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-gold" style="width:100%">💾 Guardar Entidade</button>
-          </form>
-
-          <div style="margin-top:1.5rem">
-            <h3 style="font-family:var(--serif);font-size:.88rem;color:var(--verde2);border-bottom:2px solid var(--ouro);padding-bottom:.35rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.06em">Entidades Adicionadas</h3>
-            <div id="new-entities-list" style="font-size:.8rem;color:var(--cinza3)">A carregar...</div>
           </div>
-        </div>
+
+          <div class="form-group">
+            <label>Sumário / Resumo</label>
+            <textarea name="sumario" placeholder="Resumo do documento..." required></textarea>
+          </div>
+
+          <!-- SECÇÃO B: Object Properties -->
+          <h4 class="form-section-title">Secção B: Ligações Semânticas</h4>
+            <div class="form-group">
+              <label>Entidade Emissora (Digita para pesquisar)</label>
+              <input type="text" list="rdf-entities-list" name="emitido_por_nome" placeholder="ex: Ministério das Finanças" required autocomplete="off">
+              <datalist id="rdf-entities-list">
+                </datalist>
+            </div>
+
+            <div class="form-group">
+              <label>Documento a Revogar / Alterar (Opcional - Digita para pesquisar)</label>
+              <input type="text" list="rdf-docs-list" name="revoga_label" placeholder="ex: Decreto-Lei nº 123/2022..." autocomplete="off">
+              <datalist id="rdf-docs-list">
+                </datalist>
+            </div>
+
+            <div class="form-group">
+              <label>Assunto / Tema (Separado por vírgulas)</label>
+              <input type="text" name="assunto" placeholder="ex: Saúde, Orçamento do Estado, Impostos">
+            </div>
+
+          <button type="submit" class="btn btn-primary" id="btn-submit-rdf-doc" style="width:100%; margin-top: 1rem;">💾 Gerar Triplos e Guardar</button>
+        </form>
       </div>
 
-      <!-- Documentos Adicionados -->
-      <div class="panel" style="margin-top:0">
-        <h3>📄 Documentos Adicionados</h3>
-        <div id="new-docs-list">
-          <div style="font-size:.8rem;color:var(--cinza3)">A carregar...</div>
+        <div class="panel" id="panel-add-ent" style="display: none;">
+          <h3>🏛️ Inserir Nova Entidade (Grafo RDF)</h3>
+          <p style="font-size:0.85rem;color:var(--cinza3);margin-bottom:1rem;">Esta ação injeta a entidade diretamente no ficheiro da ontologia comprimido (.bz2).</p>
+          
+          <form class="add-form" onsubmit="addRDFEntity(event)">
+            <div class="form-group">
+              <label>Nome da Entidade</label>
+              <input type="text" name="nome" placeholder="ex: Agência para a Modernização Administrativa" required>
+            </div>
+
+            <div class="form-group">
+              <label>Tipo de Entidade</label>
+              <select id="rdf-class-selector" name="tipo_uri" required>
+                <option value="">A carregar classes da ontologia...</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-submit-rdf" style="width:100%">💾 Injetar no Ficheiro .bz2</button>
+          </form>
         </div>
+
       </div>
     </div>
 
