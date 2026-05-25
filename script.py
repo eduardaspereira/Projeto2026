@@ -195,7 +195,7 @@ def create_schema(conn: sqlite3.Connection):
         );
     """)
     conn.commit()
-    # Garantir que a coluna 'entidades' existe (para compatibilidade com versões antigas)
+    # Garantir que a coluna 'entidades' existe 
     cols = [r[1] for r in conn.execute("PRAGMA table_info(documento)").fetchall()]
     if 'entidades' not in cols:
         conn.execute("ALTER TABLE documento ADD COLUMN entidades TEXT")
@@ -232,7 +232,7 @@ def load_data(filepath: str, db_path: str, limit: int = None):
             SELECT d.id, ?
             FROM documento d WHERE d.claint = ?
         """, batch_ent_doc)
-        # Não actualizar FTS por batch (fazemos build do FTS no final em blocos).
+        
         conn.commit()
         batch_docs.clear()
         batch_ent_doc.clear()
@@ -250,8 +250,6 @@ def load_data(filepath: str, db_path: str, limit: int = None):
         return eid
 
     print("A carregar dados ...")
-    # O ficheiro pode estar comprimido em bz2 ou ser um JSON plain.
-    # Tentamos abrir com bz2 e, se falhar com OSError, abrimos normalmente.
     try:
         with bz2.open(filepath, "rt", encoding="utf-8") as f:
             data = json.load(f)

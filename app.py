@@ -126,8 +126,6 @@ def api_search():
 
     if owl_class:
         if owl_class in entity_classes:
-            # CORREÇÃO: Se clicou numa classe de Entidade (ex: dre:Ministerio),
-            # NÃO queremos misturar os documentos emitidos por ela. Apenas a Entidade!
             conds.append("1 = 0")
         else:
             conds.append("d.owl_class = ?")
@@ -202,7 +200,11 @@ def api_search():
 
 @app.route("/api/rdf/classe", methods=["POST"])
 def api_add_rdf_classe():
-    """Cria uma nova classe OWL na ontologia (.ttl)"""
+    """Cria uma nova classe OWL nos dados (dre_dados.ttl)
+    
+    As classes são adicionadas aos DADOS, não à ontologia master.
+    A ontologia master (dre_ontologia.ttl) é somente para definições da estrutura.
+    """
     body = request.get_json()
     nome_classe = body.get("nome_classe", "").strip()
     super_classe_uri = body.get("super_classe", "").strip()
@@ -212,29 +214,34 @@ def api_add_rdf_classe():
         return jsonify({"ok": False, "error": "Nome da classe e Superclasse são obrigatórios."}), 400
 
     try:
-        g = Graph()
-        with open(RDF_FILE, "r", encoding="utf-8") as f:
-            g.parse(f, format="turtle")
-            
+        # Carregar grafo completo (ontologia + dados)
+        g = load_rdf_graph()
+        
         # Garante que não tem espaços (URL Encode)
         safe_name = urllib.parse.quote(nome_classe.replace(" ", ""))
-        nova_classe_uri = DRE_NS[safe_name]
+        nova_classe_uri = URIRef(f"{str(DRE_NS)}{safe_name}")
         
         # Injeta os triplos estruturais
-        g.add((nova_classe_uri, RDF.type, URIRef("http://www.w3.org/2002/07/owl#Class")))
+        g.add((nova_classe_uri, RDF.type, OWL.Class))
         g.add((nova_classe_uri, RDFS.subClassOf, URIRef(super_classe_uri)))
         
         if label:
             g.add((nova_classe_uri, RDFS.label, Literal(label, lang="pt")))
 
-        # Guarda atómicamente no .ttl em modo binário ('wb')
+        dados_graph = Graph()
+        for s, p, o in g.triples((None, None, None)):
+            # Manter apenas instâncias (não owl:Class definitions da ontologia)
+            if str(s).startswith(str(DRE_NS)) or str(s).startswith(str(DREX_NS)):
+                dados_graph.add((s, p, o))
+        
+
         fd, temp_path = tempfile.mkstemp(suffix=".ttl")
         os.close(fd) 
         
         with open(temp_path, "wb") as f_out:
-            g.serialize(destination=f_out, format="turtle")
+            dados_graph.serialize(destination=f_out, format="turtle")
             
-        shutil.move(temp_path, RDF_FILE)
+        shutil.move(temp_path, DADOS_FILE)
         
         return jsonify({"ok": True, "uri": str(nova_classe_uri)})
 
@@ -242,6 +249,105 @@ def api_add_rdf_classe():
         if 'temp_path' in locals() and os.path.exists(temp_path):
             os.remove(temp_path)
         return jsonify({"ok": False, "error": f"Erro interno: {str(e)}"}), 500
+
+@app.route("/api/rdf/classe", methods=["DELETE"])
+def api_delete_rdf_classe():
+    """Remove uma classe OWL dos dados (dre_dados.ttl)
+    
+    Remove de dre_dados.ttl, não da ontologia master (dre_ontologia.ttl).
+    """
+    temp_path = None
+    try:
+        body = request.get_json()
+        class_name = body.get("class_name", "").strip()
+        class_uri = body.get("class_uri", "").strip()
+        
+        if not class_name and not class_uri:
+            return jsonify({"ok": False, "error": "Nome ou URI da classe são obrigatórios"}), 400
+        
+        # Se só temos o nome (dre:Classe), construir o URI
+        if not class_uri and class_name:
+            if class_name.startswith('ns1:'):
+                short_name = class_name.replace('ns1:', '')
+                class_uri = f"http://dre.pt/ontology#{short_name}"
+            elif class_name.startswith('dre:'):
+                short_name = class_name.replace('dre:', '')
+                class_uri = f"http://dre.pt/ontologia#{short_name}"
+            else:
+                short_name = class_name
+                class_uri = f"http://dre.pt/ontologia#{short_name}"
+        
+        print(f"[DELETE CLASS] Removendo classe: {class_name} ({class_uri})")
+        
+        # Carregar o grafo RDF completo
+        g = load_rdf_graph()
+        
+        classe_uriref = URIRef(class_uri)
+        
+        # Contar triplos antes
+        triplos_antes = len(g)
+        
+        # Remover todos os triplos contendo a classe
+        triplos_a_remover = []
+        
+        # Triplos onde a classe é sujeito: (classe, ?, ?)
+        for p, o in list(g.predicate_objects(classe_uriref)):
+            triplos_a_remover.append((classe_uriref, p, o))
+        
+        # Triplos onde a classe é objeto: (?, ?, classe)
+        for s, p in list(g.subject_predicates(classe_uriref)):
+            triplos_a_remover.append((s, p, classe_uriref))
+        
+        print(f"[DELETE CLASS] Encontrados {len(triplos_a_remover)} triplos para remover")
+        
+        # Remover os triplos
+        removidos = 0
+        for s, p, o in triplos_a_remover:
+            try:
+                g.remove((s, p, o))
+                removidos += 1
+            except Exception as e:
+                print(f"[DELETE CLASS] Erro ao remover triplo: {e}")
+        
+        triplos_depois = len(g)
+        print(f"[DELETE CLASS] Triplos antes: {triplos_antes}, depois: {triplos_depois}, removidos: {removidos}")
+        
+        # Guardar APENAS os dados 
+        # Filtra apenas instâncias que não são definições de classes
+        dados_graph = Graph()
+        
+        # Copiar os prefixos
+        for prefix, namespace in g.namespaces():
+            dados_graph.bind(prefix, namespace)
+        
+        # Copiar apenas triplos de instâncias/dados
+        for s, p, o in g.triples((None, None, None)):
+            # Manter instâncias 
+            if (p, o) == (RDF.type, OWL.Class):
+                continue
+            # Manter instâncias e relacoes
+            dados_graph.add((s, p, o))
+        
+        fd, temp_path = tempfile.mkstemp(suffix=".ttl")
+        os.close(fd) 
+        
+        with open(temp_path, "wb") as f_out:
+            dados_graph.serialize(destination=f_out, format="turtle")
+        
+        shutil.move(temp_path, DADOS_FILE)
+        print(f"[DELETE CLASS] Ficheiro {DADOS_FILE} atualizado com sucesso")
+        
+        return jsonify({"ok": True, "removed_triples": removidos, "file": DADOS_FILE})
+
+    except Exception as e:
+        print(f"[DELETE CLASS] Erro: {str(e)}")
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        return jsonify({"ok": False, "error": f"Erro ao remover classe: {str(e)}"}), 500
+
 
 @app.route("/api/rdf/entidade", methods=["POST"])
 def api_add_rdf_entidade():
@@ -255,7 +361,8 @@ def api_add_rdf_entidade():
 
     try:
         # Normaliza a classe para o formato curto do SQLite (ex: dre:Ministerio)
-        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "dre:")
+        # Suporta ambos os namespaces: ontology e ontologia
+        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "ns1:").replace("http://dre.pt/ontologia#", "dre:")
 
         # 1. ESCRITA NO SQLITE (Garante tipagem correta para os contadores e filtros)
         db = get_db()
@@ -267,9 +374,7 @@ def api_add_rdf_entidade():
         db.commit()
 
         # 2. ESCRITA NO GRAFO RDF (.ttl)
-        g = Graph()
-        with open(RDF_FILE, "r", encoding="utf-8") as f:
-            g.parse(f, format="turtle")
+        g = load_rdf_graph()
             
         safe_name = urllib.parse.quote(nome.replace(" ", "_"))
         nova_entidade_uri = DRE_NS[safe_name]
@@ -283,7 +388,7 @@ def api_add_rdf_entidade():
         with open(temp_path, "wb") as f_out:
             g.serialize(destination=f_out, format="turtle")
             
-        shutil.move(temp_path, RDF_FILE)
+        shutil.move(temp_path, DADOS_FILE)
         return jsonify({"ok": True, "uri": str(nova_entidade_uri)})
 
     except Exception as e:
@@ -297,7 +402,7 @@ def api_add_rdf_documento():
     """Gera e injeta os triplos no .ttl E guarda no SQLite com tratamento para NameError"""
     body = request.get_json()
     
-    # Secção A - RESOLUÇÃO DO NameError: Garantir recolha de todas as variáveis
+    # Garantir recolha de todas as variáveis
     tipo_uri = body.get("tipo_uri", "").strip()
     numero = body.get("numero", "").strip()
     data_pub = body.get("data_publicacao", "").strip()
@@ -305,7 +410,6 @@ def api_add_rdf_documento():
     dr_number = body.get("dr_number", "").strip()
     url_pdf = body.get("url_pdf", "").strip()
     
-    # Secção B
     nome_entidade = body.get("emitido_por_nome", "").strip()
     label_documento = body.get("revoga_label", "").strip()
     assuntos = [a.strip() for a in body.get("assunto", "").split(",") if a.strip()]
@@ -316,14 +420,15 @@ def api_add_rdf_documento():
     try:
         db = get_db()
         
-        # CORREÇÃO DA DUPLICAÇÃO: Converte a URI para o prefixo dre: esperado pelo SQLite
-        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "dre:")
+        # Converte a URI para o prefixo dre: esperado pelo SQLite
+        # Suporta ambos os namespaces: ontology e ontologia
+        owl_class_db = tipo_uri.replace("http://dre.pt/ontology#", "ns1:").replace("http://dre.pt/ontologia#", "dre:")
         doc_type_short = tipo_uri.split("#")[-1] if "#" in tipo_uri else tipo_uri.split(":")[-1]
         
         # Extrair ano para consistência do dump original
         ano = int(data_pub[:4]) if data_pub and len(data_pub) >= 4 else None
 
-        # 1. SALVAR NO SQLITE
+        # 1. Guardar
         cur = db.execute("""
             INSERT INTO documento (doc_type, owl_class, numero, dr_number, data, ano, sumario, entidades, url_pdf, timestamp, in_force)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)
@@ -349,10 +454,8 @@ def api_add_rdf_documento():
                 
         db.commit()
 
-        # 2. SALVAR NO FICHEIRO GRAPH RDF (.ttl)
-        g = Graph()
-        with open(RDF_FILE, "r", encoding="utf-8") as f:
-            g.parse(f, format="turtle")
+        # 2. Guardar no .ttl
+        g = load_rdf_graph()
             
         safe_num = urllib.parse.quote(numero.replace("/", "_").replace(" ", ""))
         doc_uri = DRE_NS[f"Doc_{safe_num}_{data_pub.replace('-','')}"]
@@ -394,7 +497,7 @@ def api_add_rdf_documento():
         with open(temp_path, "wb") as f_out:
             g.serialize(destination=f_out, format="turtle")
             
-        shutil.move(temp_path, RDF_FILE)
+        shutil.move(temp_path, DADOS_FILE)
         return jsonify({"ok": True, "uri": str(doc_uri)})
 
     except Exception as e:
@@ -614,7 +717,6 @@ def api_entidade_docs(ent_id):
             if len(tokens) != 1 or tokens[0] != target:
                 continue
                 
-            # CORREÇÃO DEFINITIVA: Mudado de entity_id para entidade_id aqui também
             linked = db.execute("""
                 SELECT 1 FROM documento_entidade 
                 WHERE doc_id=? AND entidade_id IN (SELECT id FROM entidade_emissora WHERE nome=?)
@@ -720,8 +822,8 @@ def api_owl_classes():
         counts[r["owl_class"]] = counts.get(r["owl_class"], 0) + r["count"]
         
     for r in rows_ents:
-        # Garante que agrupa corretamente convertendo http://... para dre:
-        cls = r["owl_class"].replace("http://dre.pt/ontology#", "dre:")
+        # Garante que agrupa corretamente convertendo http://... para dre: ou ns1:
+        cls = r["owl_class"].replace("http://dre.pt/ontology#", "ns1:").replace("http://dre.pt/ontologia#", "dre:")
         counts[cls] = counts.get(cls, 0) + r["count"]
         
     # 3. Conta as Entidades Emissoras base do Dump (que por defeito são dre:EntidadeEmissora)
@@ -737,60 +839,75 @@ def api_owl_classes():
 
 @app.route("/api/owl-classes-all")
 def api_owl_classes_all():
-    """Retorna todas as classes OWL lidas diretamente do ficheiro TTL.
+    """Retorna todas as classes OWL definidas na ontologia.
 
     Cada entrada inclui:
       - cls: forma curta (ex: dre:Ministerio)
       - uri: URI completa
       - label: rótulo legível (se existir)
       - parents: array de classes parent (forma curta)
+      - count: número de instâncias desta classe nos dados
     """
     try:
-        g = Graph()
-        g.parse(RDF_FILE, format='turtle')
+        g = load_rdf_graph()
     except Exception as e:
-        return jsonify({'error': 'Não foi possível ler o ficheiro TTL', 'detail': str(e)}), 500
+        return jsonify({'error': 'Não foi possível carregar o grafo RDF', 'detail': str(e)}), 500
 
     classes = set()
-    # 1) classes explicitamente declaradas como owl:Class
+    
+    # APENAS classes explicitamente declaradas como owl:Class na ontologia
     for s in g.subjects(RDF.type, OWL.Class):
         if isinstance(s, URIRef):
             classes.add(s)
 
-    # 2) classes usadas como tipo (rdf:type) para instâncias no grafo
-    for o in g.objects(None, RDF.type):
-        if isinstance(o, URIRef):
-            classes.add(o)
-
-    # 3) incluir classes que aparecem nas tabelas SQLite (usadas no DB)
-    db = get_db()
-    used_classes = db.execute("SELECT DISTINCT owl_class FROM documento WHERE owl_class IS NOT NULL").fetchall()
-    for row in used_classes:
-        cls = row[0]
-        if cls and cls.startswith('dre:'):
-            uri = str(DRE_NS[cls.split(':', 1)[1]])
-            classes.add(URIRef(uri))
-
     result = []
     for c in sorted(classes, key=lambda u: str(u)):
-        # obter label e parents
+        # Obter label
         label_lit = g.value(c, RDFS.label)
         label = str(label_lit) if label_lit else (str(c).split('#')[-1] if '#' in str(c) else str(c))
+        
+        # Obter classes parent (rdfs:subClassOf)
         parents = []
         for p in g.objects(c, RDFS.subClassOf):
-            if isinstance(p, URIRef):
-                if str(p).startswith(str(DRE_NS)):
+            if isinstance(p, URIRef) and str(p) != str(OWL.Thing):
+                if str(p).startswith(str(DRE_ONT_NS)):
                     parents.append('dre:' + str(p).split('#')[-1])
+                elif str(p).startswith(str(DRE_NS)):
+                    parents.append('ns1:' + str(p).split('#')[-1])
                 else:
                     parents.append(str(p))
-        short = 'dre:' + str(c).split('#')[-1] if str(c).startswith(str(DRE_NS)) else str(c)
-        # Evita chamar g.value com três posicionais (pode causar erro em algumas versões do rdflib)
-        declared = (c, RDF.type, OWL.Class) in g
-        result.append({'cls': short, 'uri': str(c), 'label': label, 'parents': parents, 'declared': declared})
+        
+        # Forma curta da classe
+        if str(c).startswith(str(DRE_ONT_NS)):
+            short = 'dre:' + str(c).split('#')[-1]
+        elif str(c).startswith(str(DRE_NS)):
+            short = 'ns1:' + str(c).split('#')[-1]
+        else:
+            short = str(c)
+        
+        # Contar instâncias desta classe (rdf:type)
+        count = sum(1 for _ in g.subjects(RDF.type, c))
+        
+        result.append({
+            'cls': short,
+            'uri': str(c),
+            'label': label,
+            'parents': parents,
+            'declared': True,  # já sabemos que é owl:Class
+            'count': count
+        })
 
-    # ordenar por label legível
-    result.sort(key=lambda x: x.get('label') or x.get('cls'))
-    return jsonify(result)
+    # Remover duplicados por 'cls' (manter apenas o primeiro de cada classe)
+    seen_classes = set()
+    result_unique = []
+    for item in result:
+        if item['cls'] not in seen_classes:
+            seen_classes.add(item['cls'])
+            result_unique.append(item)
+    
+    # Ordenar por label legível
+    result_unique.sort(key=lambda x: x.get('label') or x.get('cls'))
+    return jsonify(result_unique)
 
 
 @app.route("/api/quickstats")
@@ -915,11 +1032,37 @@ def api_get_documento_novo(doc_id):
     return jsonify(dict(row))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Integração Direta com Ficheiro RDF (.bz2)
+# Integração RDF: Ontologia + Dados
 # ─────────────────────────────────────────────────────────────────────────────
 
-RDF_FILE = "dre_ontologia.ttl"
+ONTOLOGIA_FILE = "dre_ontologia.ttl"  # Master: Classes + Propriedades
+DADOS_FILE = "dre_dados.ttl"          # Dados: Apenas Instâncias
 DRE_NS = Namespace("http://dre.pt/ontology#")
+DRE_ONT_NS = Namespace("http://dre.pt/ontologia#")
+DREX_NS = Namespace("http://dre.pt/recurso/")
+
+def load_rdf_graph():
+    """Carrega o grafo RDF completo: ontologia + dados.
+    
+    Combina:
+    - dre_ontologia.ttl (ontologia master: classes + propriedades)
+    - dre_dados.ttl (dados: instâncias)
+    
+    Retorna um único grafo RDF em memória.
+    """
+    g = Graph()
+    try:
+        # Carregar ontologia (master)
+        if os.path.exists(ONTOLOGIA_FILE):
+            g.parse(ONTOLOGIA_FILE, format='turtle')
+        
+        # Carregar dados (instâncias) para o mesmo grafo
+        if os.path.exists(DADOS_FILE):
+            g.parse(DADOS_FILE, format='turtle')
+    except Exception as e:
+        print(f"Erro ao carregar RDF: {e}")
+    
+    return g
 
 
 
@@ -936,13 +1079,13 @@ def api_extract_pdf():
     try:
         reader = PyPDF2.PdfReader(file)
         text = ""
-        # Extrair texto das primeiras 3 páginas (geralmente chega para sumário, data e entidade)
+        # Extrair texto das primeiras 3 páginas (sumário, data e entidade)
         for i in range(min(3, len(reader.pages))):
             extracted = reader.pages[i].extract_text()
             if extracted:
                 text += extracted + "\n"
 
-        # Lógica Simples de "IA" / Regex para pré-preencher
+        # Regex para pré-preencher
         # 1. Adivinhar Data (ex: 14 de maio de 2026)
         data_encontrada = ""
         match_data = re.search(r'(\d{1,2})\s+de\s+([a-zA-Zçço]+)\s+de\s+(\d{4})', text, re.IGNORECASE)
@@ -996,55 +1139,64 @@ def get_subclasses(g, root_uri):
 
 @app.route("/api/rdf/classes", methods=["GET"])
 def api_rdf_classes_fast():
-    """Lê o .ttl para buscar classes que herdam de Entidade."""
+    """Retorna classes que herdam de EntidadeEmissora."""
     try:
-        g = Graph()
-        with open(RDF_FILE, "r", encoding="utf-8") as f:
-            g.parse(f, format="turtle")
+        g = load_rdf_graph()
         
-        # Busca recursiva de subclasses de EntidadeEmissora
-        subs = get_subclasses(g, "http://dre.pt/ontology#EntidadeEmissora")
+        # Procura recursiva de subclasses de EntidadeEmissora
+        ent_emissora_uri = URIRef("http://dre.pt/ontologia#EntidadeEmissora")
+        subs = get_subclasses(g, str(ent_emissora_uri))
         
         result = []
         for s in subs:
-            label = s.split("#")[-1] # Tenta obter o nome curto
+            label = str(g.value(URIRef(s), RDFS.label) or s.split("#")[-1])
             result.append({"uri": s, "label": label})
         return jsonify(result)
     except Exception as e:
+        print(f"Erro em api_rdf_classes_fast: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/rdf/form-options", methods=["GET"])
 def api_rdf_form_options_fast():
-    """Lê o .ttl para buscar classes que herdam de Documento."""
+    """Retorna TODAS as classes OWL e entidades para popular formulários."""
     try:
-        g = Graph()
-        with open(RDF_FILE, "r", encoding="utf-8") as f:
-            g.parse(f, format="turtle")
-            
-        # Busca recursiva de subclasses de DocumentoOficial
-        subs = get_subclasses(g, "http://dre.pt/ontology#DocumentoOficial")
+        g = load_rdf_graph()
         
-        classes_doc = [{"uri": s, "label": s.split("#")[-1]} for s in subs]
-
-        # Entidades (para o dropdown da Secção B)
-        # Usamos uma query para buscar todas as instâncias de sub-classes de EntidadeEmissora
-        query_ents = """
+        # ========== TODAS as classes OWL (sem filtro de hierarquia) ==========
+        all_classes = []
+        for s in g.subjects(RDF.type, OWL.Class):
+            label = str(g.value(s, RDFS.label) or s.split("#")[-1])
+            all_classes.append({"uri": str(s), "label": label})
+        
+        # Ordenar por label 
+        all_classes.sort(key=lambda x: x["label"])
+        
+        # ========== Instâncias de EntidadeEmissora e suas subclasses ==========
+        ent_emissora_uri = URIRef("http://dre.pt/ontologia#EntidadeEmissora")
+        entidades = []
+        
+        query = """
             PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-            SELECT DISTINCT ?ent ?nome WHERE {
+            PREFIX dre: <http://dre.pt/ontologia#>
+            SELECT DISTINCT ?ent ?label WHERE {
                 ?ent rdf:type ?type .
-                ?type rdfs:subClassOf* <http://dre.pt/ontology#EntidadeEmissora> .
-                OPTIONAL { ?ent <http://dre.pt/ontology#nome> ?nome }
+                ?type rdfs:subClassOf* dre:EntidadeEmissora .
+                OPTIONAL { ?ent rdfs:label ?label }
             }
         """
-        entidades = []
-        for r in g.query(query_ents):
-            ent_uri = str(r.ent)
-            ent_nome = str(r.nome or ent_uri.split("#")[-1])
-            entidades.append({"uri": ent_uri, "label": ent_nome})
+        for row in g.query(query):
+            ent_uri = str(row.ent)
+            ent_label = str(row.label or ent_uri.split("#")[-1])
+            entidades.append({"uri": ent_uri, "label": ent_label})
 
-        return jsonify({"classes_doc": classes_doc, "entidades": entidades, "documentos": []})
+        return jsonify({
+            "all_classes": all_classes,     
+            "classes_doc": all_classes,       
+            "entidades": entidades
+        })
     except Exception as e:
+        print(f"Erro em api_rdf_form_options_fast: {e}")
         return jsonify({"error": str(e)}), 500
 
         

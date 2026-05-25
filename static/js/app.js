@@ -1,7 +1,6 @@
-// JS principal extraído do template HTML
 let currentPage = 1;
 let currentDocId = null;
-let currentEntityId = null; // Mantido no escopo global
+let currentEntityId = null; 
 
 function showView(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -12,6 +11,7 @@ function showView(id, btn) {
   if (id === 'adicionar') { 
     loadAddedItems();
     loadOntologyClasses();  // Carregar classes quando o utilizador abrir esta aba
+    loadRdfParentClasses();  // Carregar classes mãe para o formulário de criar classe
   }
   if (id === 'ontologia') renderOntologyTree();
 }
@@ -235,7 +235,7 @@ async function addEntity(e) {
     showToast(msg);
     e.target.reset();
     
-    // Limpar e resetar campos
+    // Limpar campos
     document.getElementById('class-selector').value = '';
     document.getElementById('new-class-fields').style.display = 'none';
     document.getElementById('new-class-name').value = '';
@@ -314,7 +314,6 @@ function renderResults(data) {
                      : r.categoria === 'Ato Administrativo' ? 'badge-adm'
                      : r.categoria === 'Ato Informativo' ? 'badge-info' : 'badge-outro';
     
-    // Entidades: fundo branco para destacar como pedido
     const rowColor = r.is_entity ? 'background-color: #ffffff;' : ''; 
     const vigencia = r.is_entity ? '—' : (r.in_force ? '<span class="vigente">● Em vigor</span>' : '<span class="revogado">○ Revogado</span>');
     const pdf = r.url_pdf ? `<a href="${r.url_pdf}" target="_blank" class="link-doc" title="Abrir PDF">📄</a>` : '—';
@@ -539,15 +538,20 @@ function getCustomClasses() {
   catch { return []; }
 }
 
-function saveCustomClass(localname, parent, label) {
+function saveCustomClass(localname, parent, label, uri = null) {
   const classes = getCustomClasses();
   const fullClass = 'dre:' + localname;
   const fullParent = parent ? 'dre:' + parent : 'dre:EntidadeEmissora';
   if (!classes.find(c => c.cls === fullClass)) {
-    classes.push({ cls: fullClass, parent: fullParent, label: label || localname });
+    classes.push({ 
+      cls: fullClass, 
+      parent: fullParent, 
+      label: label || localname,
+      uri: uri || null  // Armazenar URI se disponível
+    });
     localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
   }
-  // Não renderizar aqui, vai ser renderizado quando a vista ontologia for acionada
+
 }
 
 function renderCustomClassesTree() {
@@ -555,12 +559,49 @@ function renderCustomClassesTree() {
   // Esta função é mantida por compatibilidade
 }
 
-function removeCustomClass(cls) {
-  if (!confirm('Remover a classe ' + cls + ' da árvore?')) return;
-  const classes = getCustomClasses().filter(c => c.cls !== cls);
-  localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
-  renderOntologyTree();  // Re-renderizar a árvore
-  showToast('Classe removida da árvore');
+async function removeCustomClass(cls) {
+  if (!confirm('⚠️ Remover a classe ' + cls + ' da ontologia permanentemente? Esta ação não pode ser desfeita.')) return;
+  
+  try {
+    // Obter a classe personalizada para extrair o URI
+    const customClasses = getCustomClasses();
+    const customClass = customClasses.find(c => c.cls === cls);
+    
+    if (!customClass) {
+      showToast('Classe não encontrada', true);
+      return;
+    }
+    
+    console.log('A remover classe:', cls);
+    
+    // Remover da ontologia (.ttl) através do backend
+    const res = await fetch('/api/rdf/classe', { 
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ class_name: cls })
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      showToast('Erro do servidor: ' + res.status + ' — ' + (errorData.error || 'Erro desconhecido'), true);
+      return;
+    }
+    
+    const data = await res.json();
+    
+    if (data.ok) {
+      // Remover do localStorage também
+      const classes = getCustomClasses().filter(c => c.cls !== cls);
+      localStorage.setItem(CUSTOM_CLASSES_KEY, JSON.stringify(classes));
+      renderOntologyTree();  // Re-renderizar a árvore
+      showToast('✓ Classe ' + cls + ' removida da ontologia');
+    } else {
+      showToast('Erro ao remover classe: ' + (data.error || 'Erro desconhecido'), true);
+    }
+  } catch (err) {
+    console.error('Erro ao remover classe:', err);
+    showToast('Erro de comunicação: ' + err.message, true);
+  }
 }
 
 // ─── Seleção de classes OWL e gerenciar nova classe ────────────────────────
@@ -576,7 +617,6 @@ async function loadOntologyClasses() {
     const classes = await res.json();
     if (!Array.isArray(classes)) return;
 
-    // Popular selects que esperam URIs (forms RDF)
     const rdfClassSel = document.getElementById('rdf-class-selector');
     const rdfDocType = document.getElementById('rdf-doc-type');
     const rdfParent = document.getElementById('rdf-parent-class');
@@ -666,7 +706,15 @@ async function renderOntologyTree() {
       console.error('Erro ao buscar classes OWL:', res.status);
       return;
     }
-    const allClasses = await res.json();
+    let allClasses = await res.json();
+    
+    // Remover duplicados por 'cls'
+    const seen = new Set();
+    allClasses = allClasses.filter(c => {
+      if (seen.has(c.cls)) return false;
+      seen.add(c.cls);
+      return true;
+    });
   
   // Definir a hierarquia: map de classe -> [subclasses]
   const hierarchy = {
@@ -704,35 +752,66 @@ async function renderOntologyTree() {
     'dre:Aviso': ['dre:AvisoExtrato']
   };
 
+  // Adicionar classes personalizadas à hierarquia
+  const customClasses = getCustomClasses();
+  customClasses.forEach(c => {
+    // Encontrar a classe mãe (extrair apenas o nome curto)
+    const parentShort = c.parent ? c.parent.replace('dre:', '') : 'DocumentoOficial';
+    const parentFull = c.parent || 'dre:DocumentoOficial';
+    
+    if (!hierarchy[parentFull]) {
+      hierarchy[parentFull] = [];
+    }
+    if (!hierarchy[parentFull].includes(c.cls)) {
+      hierarchy[parentFull].push(c.cls);
+    }
+  });
+
   // Criar map de classe -> label para lookup rápido
   const classMap = new Map(allClasses.map(c => [c.cls, c.label]));
   
+  // Adicionar classes personalizadas ao mapa
+  customClasses.forEach(c => {
+    if (!classMap.has(c.cls)) {
+      classMap.set(c.cls, c.label || c.cls.replace('dre:', ''));
+    }
+  });
+  
   // Renderizar a árvore
-  let html = '';
+  let html = `<div style="font-family: monospace; font-size: 0.9rem; line-height: 1.6;">`;
   
   // Raiz: DocumentoOficial
-  html += `<div class="level0">🌳 dre:DocumentoOficial</div>`;
+  html += `<div style="padding-left: 0;">🌳 dre:DocumentoOficial</div>`;
   
   // Função recursiva para renderizar subclasses
-  function renderChildren(parentClass, level, isLast = false) {
+  function renderChildren(parentClass, level) {
     const children = hierarchy[parentClass] || [];
     if (!children.length) return '';
     
     let html = '';
-    const prefix = isLast ? '   ' : '│  ';
+    const indentSize = level * 2; // 2em por nível
     
     children.forEach((child, idx) => {
       const isLastChild = idx === children.length - 1;
       const icon = isLastChild ? '└─' : '├─';
       const label = classMap.get(child) || child.replace('dre:', '');
+      const isCustom = customClasses.some(c => c.cls === child);
+      const customClass = isCustom ? customClasses.find(c => c.cls === child) : null;
       
-      html += `<div class="level${level + 1}" style="${level > 2 ? 'opacity: 0.85;' : ''}">${prefix}${icon} <span style="font-weight:500">${child}</span> <span style="font-size:.75rem;color:var(--cinza3)">— ${label}</span></div>`;
+      let classHtml = `<div style="padding-left: ${indentSize}em; display: flex; justify-content: space-between; align-items: center; ${level > 3 ? 'opacity: 0.85;' : ''}">`;
+      classHtml += `<span style="flex: 1;">`;
+      classHtml += `${icon} <span style="font-weight:500;${isCustom ? 'color:var(--verde2)' : ''}">${child}</span> <span style="font-size:.75rem;color:var(--cinza3)">— ${label}</span>`;
+      classHtml += `</span>`;
+      
+      if (isCustom && customClass) {
+        classHtml += `<button onclick="removeCustomClass('${child}')" style="background:none;border:none;cursor:pointer;color:var(--vermelho);font-size:.7rem;padding:0 .2rem;margin-left:.5rem;flex-shrink:0;" title="Remover classe">✕</button>`;
+      }
+      
+      classHtml += `</div>`;
+      html += classHtml;
       
       // Renderizar filhos deste filho
-      const grandchildrenHtml = renderChildren(child, level + 1, isLastChild);
-      if (grandchildrenHtml) {
-        html += grandchildrenHtml.split('\n').map(line => prefix + line).join('\n');
-      }
+      html += renderChildren(child, level + 1);
     });
     
     return html;
@@ -740,27 +819,7 @@ async function renderOntologyTree() {
   
   // Renderizar subclasses de DocumentoOficial
   html += renderChildren('dre:DocumentoOficial', 1);
-  
-  // Adicionar secção de classes personalizadas
-  const customClasses = getCustomClasses();
-  if (customClasses.length > 0) {
-    html += `<div class="level1" style="margin-top:.75rem;border-top:1px dashed var(--cinza2);padding-top:.5rem">
-      <div style="color:var(--cinza3);font-size:.75rem;margin-bottom:.25rem">✦ Classes Personalizadas</div>`;
-    
-    customClasses.forEach(c => {
-      const label = c.label || c.cls.replace('dre:', '');
-      html += `<div class="level2" style="display:flex;justify-content:space-between;align-items:center;margin-top:.25rem">
-        <span>├─ <span style="color:var(--verde2);font-weight:500">${c.cls}</span>
-          <span style="font-size:.68rem;color:var(--cinza3)">${label}</span>
-        </span>
-        <button onclick="removeCustomClass('${c.cls}')" 
-          style="background:none;border:none;cursor:pointer;color:var(--vermelho);font-size:.75rem;padding:.1rem .3rem" 
-          title="Remover classe">✕</button>
-      </div>`;
-    });
-    
-    html += '</div>';
-  }
+  html += `</div>`;
   
   document.getElementById('ontology-tree').innerHTML = html;
   } catch (err) {
@@ -773,22 +832,39 @@ async function renderOntologyTree() {
 
 async function loadOwlClasses() {
   try {
-    // Carregar TODAS as classes para exibição na sidebar (não apenas as usadas)
+    // Carregar TODAS as classes para exibição na sidebar 
     const res = await fetch('/api/owl-classes-all');
     if (!res.ok) throw new Error('Erro ao buscar classes');
-    const allClasses = await res.json();
+    let allClasses = await res.json();
+    
+    // Remover duplicados por 'cls' 
+    const seen = new Set();
+    allClasses = allClasses.filter(c => {
+      if (seen.has(c.cls)) return false;
+      seen.add(c.cls);
+      return true;
+    });
     
     // Também carregar as contagens de documentos por classe
     const res2 = await fetch('/api/owl-classes');
     if (!res2.ok) throw new Error('Erro ao buscar contagens');
-    const usedClasses = await res2.json();
+    let usedClasses = await res2.json();
+    
+    // Remover duplicados das contagens
+    const seenCounts = new Set();
+    usedClasses = usedClasses.filter(c => {
+      if (seenCounts.has(c.owl_class)) return false;
+      seenCounts.add(c.owl_class);
+      return true;
+    });
+    
     const countMap = new Map(usedClasses.map(c => [c.owl_class, c.count]));
     
-    // Combinar dados: mostrar classes declaradas OU usadas na BD
+    // Combinar dados: mostrar classes que têm contagem > 0 OU que são explicitamente declaradas
     const classList = document.getElementById('owl-class-list');
     if (classList) {
-      const declaredOrUsed = allClasses.filter(c => c.declared || (countMap.get(c.cls) || 0) > 0);
-      classList.innerHTML = declaredOrUsed.map(c => {
+      const displayed = allClasses.filter(c => (countMap.get(c.cls) || 0) > 0 || c.declared);
+      classList.innerHTML = displayed.map(c => {
         const count = countMap.get(c.cls) || 0;
         return `<div class="onto-class" onclick="filterByClass('${c.cls}', this)" title="${c.cls}" style="opacity: ${count > 0 ? 1 : 0.6}">
           <span class="cls-name">${c.label}</span>
@@ -852,7 +928,7 @@ function openAddView(type, ev) {
 
   const panelDoc = document.getElementById('panel-add-doc');
   const panelEnt = document.getElementById('panel-add-ent');
-  const panelClass = document.getElementById('panel-add-class'); // NOVO
+  const panelClass = document.getElementById('panel-add-class'); 
 
   // Esconder todos por defeito
   panelDoc.style.display = 'none';
@@ -880,32 +956,44 @@ async function loadRdfParentClasses() {
   sel.innerHTML = '<option value="">A carregar opções...</option>';
   
   try {
-    // Reutilizamos os endpoints rápidos que já temos para popular isto
-    const resDocs = await fetch('/api/rdf/form-options');
-    const dataDocs = await resDocs.json();
+    // Procurar opções de classes mãe
+    const res = await fetch('/api/rdf/form-options');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     
-    const resEnts = await fetch('/api/rdf/classes');
-    const dataEnts = await resEnts.json();
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
 
     let html = '<option value="">— selecione a superclasse mãe —</option>';
     
-    html += '<optgroup label="Hierarquia de Entidades">';
-    html += '<option value="http://dre.pt/ontology#EntidadeEmissora">🏛️ Entidade Emissora (Raiz)</option>';
-    dataEnts.forEach(c => {
-      // Evita duplicar a raiz
-      if(c.uri !== "http://dre.pt/ontology#EntidadeEmissora") html += `<option value="${c.uri}">${c.label}</option>`;
-    });
-    html += '</optgroup>';
-
-    html += '<optgroup label="Hierarquia de Documentos">';
-    html += '<option value="http://dre.pt/ontology#DocumentoOficial">📄 Documento Oficial (Raiz)</option>';
-    dataDocs.classes_doc.forEach(c => html += `<option value="${c.uri}">${c.label}</option>`);
-    html += '</optgroup>';
+    // Documentos
+    if (data.classes_doc && data.classes_doc.length > 0) {
+      html += '<optgroup label="Hierarquia de Documentos">';
+      html += '<option value="http://dre.pt/ontologia#DocumentoOficial">📄 Documento Oficial (Raiz)</option>';
+      data.classes_doc.forEach(c => {
+        if (c.uri !== "http://dre.pt/ontologia#DocumentoOficial") {
+          html += `<option value="${c.uri}">${c.label}</option>`;
+        }
+      });
+      html += '</optgroup>';
+    }
+    
+    // Entidades
+    if (data.entidades && data.entidades.length > 0) {
+      html += '<optgroup label="Hierarquia de Entidades">';
+      html += '<option value="http://dre.pt/ontologia#EntidadeEmissora">🏛️ Entidade Emissora (Raiz)</option>';
+      data.entidades.forEach(c => {
+        if (c.uri !== "http://dre.pt/ontologia#EntidadeEmissora") {
+          html += `<option value="${c.uri}">${c.label}</option>`;
+        }
+      });
+      html += '</optgroup>';
+    }
 
     sel.innerHTML = html;
     updateClassPreview();
   } catch (err) {
-    sel.innerHTML = '<option value="">Erro ao carregar</option>';
+    console.error('Erro ao carregar classes mãe:', err);
+    sel.innerHTML = '<option value="">Erro ao carregar (ver consola)</option>';
   }
 }
 
@@ -948,13 +1036,23 @@ async function addRDFClass(e) {
     
     const d = await res.json();
     if (d.ok) {
-      showToast('Nova Classe OWL adicionada à ontologia!');
+      showToast('✓ Nova Classe OWL adicionada à ontologia!');
+      
+      // Guardar a classe personalizada com o URI retornado
+      const localname = body.nome_classe;
+      const parent = body.super_classe.split('#')[1] || body.super_classe;  // Extrair nome curto
+      const label = body.label;
+      const uri = d.uri;
+      
+      saveCustomClass(localname, parent, label, uri);
+      
       e.target.reset();
       updateClassPreview();
     } else {
       showToast('Erro: ' + (d.error || 'Falha na inserção'), true);
     }
   } catch(err) {
+    console.error('Erro:', err);
     showToast('Erro de comunicação com o servidor.', true);
   } finally {
     btn.textContent = '💾 Gravar Nova Classe no .ttl';
@@ -966,7 +1064,6 @@ async function addRDFClass(e) {
 async function loadRdfDocumentOptions() {
   const selType = document.getElementById('rdf-doc-type');
   const listEnt = document.getElementById('rdf-entities-list');
-  const listDoc = document.getElementById('rdf-docs-list');
   
   try {
     const res = await fetch('/api/rdf/form-options');
@@ -977,15 +1074,19 @@ async function loadRdfDocumentOptions() {
 
     // 1. Tipos de Documento
     selType.innerHTML = '<option value="">— selecione o tipo —</option>' + 
-      data.classes_doc.map(c => `<option value="${c.uri}">${c.label}</option>`).join('');
+      (data.classes_doc && data.classes_doc.length > 0 
+        ? data.classes_doc.map(c => `<option value="${c.uri}">${c.label}</option>`).join('')
+        : '<option value="" disabled>Nenhum tipo disponível</option>');
 
     // 2. Entidades Emissoras (Injeta o rótulo legível diretamente no value para a pesquisa funcionar)
-    listEnt.innerHTML = data.entidades.map(e => `<option value="${e.label}"></option>`).join('');
-
-    // 3. Documentos Existentes para Revogação
-    listDoc.innerHTML = data.documentos.map(d => `<option value="${d.label}"></option>`).join('');
+    if (listEnt) {
+      listEnt.innerHTML = (data.entidades && data.entidades.length > 0)
+        ? data.entidades.map(e => `<option value="${e.label}"></option>`).join('')
+        : '';
+    }
 
   } catch (err) {
+    console.error('Erro ao carregar dados do formulário:', err);
     showToast('Erro ao carregar dados do SQLite para o formulário.', true);
   }
 }
@@ -1095,13 +1196,13 @@ async function extractFromPDF() {
   try {
     const res = await fetch('/api/extract-pdf', {
       method: 'POST',
-      body: formData // Não uses JSON.stringify nem 'Content-Type' headers ao enviar ficheiros
+      body: formData 
     });
 
     const data = await res.json();
     
     if (data.ok) {
-      // Injetar nos campos do formulário se a IA/script tiver encontrado
+      // Injetar nos campos do formulário se tiver encontrado inf
       if (data.data_publicacao) {
         document.querySelector('input[name="data_publicacao"]').value = data.data_publicacao;
       }
