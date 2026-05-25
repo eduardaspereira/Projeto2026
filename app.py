@@ -5,7 +5,7 @@ import tempfile
 import shutil
 import urllib.parse
 from rdflib import Graph, URIRef, Literal, Namespace
-from rdflib.namespace import RDF, RDFS, XSD
+from rdflib.namespace import RDF, RDFS, XSD, OWL
 import sqlite3
 import argparse
 import json
@@ -84,9 +84,8 @@ def api_search():
         'dre:EntidadeLocal', 'dre:EntidadeRegional', 'dre:EntidadePublicaEmpresarial', 'dre:Tribunal'
     }
 
-    # --- 1. PESQUISA DE ENTIDADES (Para aparecerem mesmo sem documentos emitidos) ---
+    # --- 1. PESQUISA DE ENTIDADES ---
     entidades_results = []
-    # Só pesquisa entidades se não estivermos a usar filtros exclusivos de documentos (datas, vigor, etc.)
     if not (categoria or serie or vigor != "" or ano_ini or ano_fim):
         ent_conds, ent_params = [], []
         if q:
@@ -119,7 +118,7 @@ def api_search():
                 "sumario": e["nome"],
                 "in_force": 1,
                 "url_pdf": "",
-                "is_entity": True # Flag crucial para o frontend
+                "is_entity": True
             })
 
     # --- 2. PESQUISA DE DOCUMENTOS NORMAL ---
@@ -127,14 +126,9 @@ def api_search():
 
     if owl_class:
         if owl_class in entity_classes:
-            conds.append("""
-                EXISTS (
-                    SELECT 1 FROM documento_entidade de
-                    JOIN entidade_emissora e ON e.id = de.entidade_id
-                    WHERE de.doc_id = d.id AND e.tipo = ?
-                )
-            """)
-            params.append(owl_class)
+            # CORREÇÃO: Se clicou numa classe de Entidade (ex: dre:Ministerio),
+            # NÃO queremos misturar os documentos emitidos por ela. Apenas a Entidade!
+            conds.append("1 = 0")
         else:
             conds.append("d.owl_class = ?")
             params.append(owl_class)
@@ -205,6 +199,49 @@ def api_search():
     pages = math.ceil(total_all / per_page) if per_page else 1
 
     return jsonify({"results": results, "total": total_all, "page": page, "pages": pages})
+
+@app.route("/api/rdf/classe", methods=["POST"])
+def api_add_rdf_classe():
+    """Cria uma nova classe OWL na ontologia (.ttl)"""
+    body = request.get_json()
+    nome_classe = body.get("nome_classe", "").strip()
+    super_classe_uri = body.get("super_classe", "").strip()
+    label = body.get("label", "").strip()
+
+    if not nome_classe or not super_classe_uri:
+        return jsonify({"ok": False, "error": "Nome da classe e Superclasse são obrigatórios."}), 400
+
+    try:
+        g = Graph()
+        with open(RDF_FILE, "r", encoding="utf-8") as f:
+            g.parse(f, format="turtle")
+            
+        # Garante que não tem espaços (URL Encode)
+        safe_name = urllib.parse.quote(nome_classe.replace(" ", ""))
+        nova_classe_uri = DRE_NS[safe_name]
+        
+        # Injeta os triplos estruturais
+        g.add((nova_classe_uri, RDF.type, URIRef("http://www.w3.org/2002/07/owl#Class")))
+        g.add((nova_classe_uri, RDFS.subClassOf, URIRef(super_classe_uri)))
+        
+        if label:
+            g.add((nova_classe_uri, RDFS.label, Literal(label, lang="pt")))
+
+        # Guarda atómicamente no .ttl em modo binário ('wb')
+        fd, temp_path = tempfile.mkstemp(suffix=".ttl")
+        os.close(fd) 
+        
+        with open(temp_path, "wb") as f_out:
+            g.serialize(destination=f_out, format="turtle")
+            
+        shutil.move(temp_path, RDF_FILE)
+        
+        return jsonify({"ok": True, "uri": str(nova_classe_uri)})
+
+    except Exception as e:
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"ok": False, "error": f"Erro interno: {str(e)}"}), 500
 
 @app.route("/api/rdf/entidade", methods=["POST"])
 def api_add_rdf_entidade():
@@ -700,63 +737,59 @@ def api_owl_classes():
 
 @app.route("/api/owl-classes-all")
 def api_owl_classes_all():
-    """Retorna todas as classes OWL disponíveis com rótulos legíveis para a ontologia e entidades."""
-    # Classes da ontologia principais com rótulos legíveis
-    ontology_classes = {
-        # Classes raiz
-        'dre:DocumentoOficial': 'Documento Oficial',
-        'dre:EntidadeEmissora': 'Entidade Emissora',
-        # Subclasses de EntidadeEmissora
-        'dre:OrgaoSoberano': 'Órgão de Soberania',
-        'dre:Ministerio': 'Ministério',
-        'dre:EntidadeLocal': 'Entidade Local',
-        'dre:EntidadeRegional': 'Entidade Regional',
-        'dre:EntidadePublicaEmpresarial': 'Entidade Pública Empresarial',
-        'dre:Tribunal': 'Tribunal',
-        # Atos Normativos
-        'dre:AtoNormativo': 'Ato Normativo',
-        'dre:Lei': 'Lei',
-        'dre:LeiOrganica': 'Lei Orgânica',
-        'dre:DecretoLei': 'Decreto-Lei',
-        'dre:Decreto': 'Decreto',
-        'dre:DecretoRegulamentar': 'Decreto Regulamentar',
-        'dre:Portaria': 'Portaria',
-        'dre:Regulamento': 'Regulamento',
-        'dre:Resolucao': 'Resolução',
-        'dre:Rectificacao': 'Rectificação',
-        # Atos Administrativos
-        'dre:AtoAdministrativo': 'Ato Administrativo',
-        'dre:Despacho': 'Despacho',
-        'dre:DespachoExtrato': 'Despacho (extrato)',
-        'dre:Deliberacao': 'Deliberação',
-        'dre:Contrato': 'Contrato',
-        'dre:Louvor': 'Louvor',
-        'dre:Declaracao': 'Declaração',
-        # Atos Informativos
-        'dre:AtoInformativo': 'Ato Informativo',
-        'dre:Aviso': 'Aviso',
-        'dre:AvisoExtrato': 'Aviso (extrato)',
-        'dre:AvisoContumax': 'Aviso de Contumácia',
-        'dre:AnuncioProcedimento': 'Anúncio de Procedimento',
-        'dre:Anuncio': 'Anúncio',
-        'dre:Edital': 'Edital',
-    }
-    
-    # Adicionar classes usadas em documentos que não estão na lista acima
+    """Retorna todas as classes OWL lidas diretamente do ficheiro TTL.
+
+    Cada entrada inclui:
+      - cls: forma curta (ex: dre:Ministerio)
+      - uri: URI completa
+      - label: rótulo legível (se existir)
+      - parents: array de classes parent (forma curta)
+    """
+    try:
+        g = Graph()
+        g.parse(RDF_FILE, format='turtle')
+    except Exception as e:
+        return jsonify({'error': 'Não foi possível ler o ficheiro TTL', 'detail': str(e)}), 500
+
+    classes = set()
+    # 1) classes explicitamente declaradas como owl:Class
+    for s in g.subjects(RDF.type, OWL.Class):
+        if isinstance(s, URIRef):
+            classes.add(s)
+
+    # 2) classes usadas como tipo (rdf:type) para instâncias no grafo
+    for o in g.objects(None, RDF.type):
+        if isinstance(o, URIRef):
+            classes.add(o)
+
+    # 3) incluir classes que aparecem nas tabelas SQLite (usadas no DB)
     db = get_db()
-    used_classes = db.execute("""
-        SELECT DISTINCT owl_class FROM documento WHERE owl_class IS NOT NULL
-    """).fetchall()
-    
+    used_classes = db.execute("SELECT DISTINCT owl_class FROM documento WHERE owl_class IS NOT NULL").fetchall()
     for row in used_classes:
         cls = row[0]
-        if cls and cls not in ontology_classes:
-            # Gerar rótulo a partir da classe (remover 'dre:')
-            label = cls.replace('dre:', '')
-            ontology_classes[cls] = label
-    
-    # Converter para lista com estrutura esperada
-    result = [{"cls": k, "label": v} for k, v in sorted(ontology_classes.items())]
+        if cls and cls.startswith('dre:'):
+            uri = str(DRE_NS[cls.split(':', 1)[1]])
+            classes.add(URIRef(uri))
+
+    result = []
+    for c in sorted(classes, key=lambda u: str(u)):
+        # obter label e parents
+        label_lit = g.value(c, RDFS.label)
+        label = str(label_lit) if label_lit else (str(c).split('#')[-1] if '#' in str(c) else str(c))
+        parents = []
+        for p in g.objects(c, RDFS.subClassOf):
+            if isinstance(p, URIRef):
+                if str(p).startswith(str(DRE_NS)):
+                    parents.append('dre:' + str(p).split('#')[-1])
+                else:
+                    parents.append(str(p))
+        short = 'dre:' + str(c).split('#')[-1] if str(c).startswith(str(DRE_NS)) else str(c)
+        # Evita chamar g.value com três posicionais (pode causar erro em algumas versões do rdflib)
+        declared = (c, RDF.type, OWL.Class) in g
+        result.append({'cls': short, 'uri': str(c), 'label': label, 'parents': parents, 'declared': declared})
+
+    # ordenar por label legível
+    result.sort(key=lambda x: x.get('label') or x.get('cls'))
     return jsonify(result)
 
 
@@ -952,82 +985,70 @@ def api_extract_pdf():
     except Exception as e:
         return jsonify({"error": f"Erro ao processar o PDF: {str(e)}"}), 500
 
+
+# Função auxiliar para encontrar subclasses no Grafo
+def get_subclasses(g, root_uri):
+    query = """
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    SELECT DISTINCT ?sub WHERE { ?sub rdfs:subClassOf* <%s> . FILTER(?sub != <%s>) }
+    """ % (root_uri, root_uri)
+    return [str(res.sub) for res in g.query(query)]
+
 @app.route("/api/rdf/classes", methods=["GET"])
 def api_rdf_classes_fast():
-    """Devolve as classes de entidades usando o SQLite e o mapa já existente."""
+    """Lê o .ttl para buscar classes que herdam de Entidade."""
     try:
-        # Aproveitamos as classes que já tens mapeadas no teu app.py original
-        classes_entidade = [
-            {"uri": "http://dre.pt/ontology#EntidadeEmissora", "label": "Entidade Emissora"},
-            {"uri": "http://dre.pt/ontology#OrgaoSoberano", "label": "Órgão de Soberania"},
-            {"uri": "http://dre.pt/ontology#Ministerio", "label": "Ministério"},
-            {"uri": "http://dre.pt/ontology#EntidadeLocal", "label": "Entidade Local"},
-            {"uri": "http://dre.pt/ontology#EntidadeRegional", "label": "Entidade Regional"},
-            {"uri": "http://dre.pt/ontology#EntidadePublicaEmpresarial", "label": "Entidade Pública Empresarial"},
-            {"uri": "http://dre.pt/ontology#Tribunal", "label": "Tribunal"}
-        ]
-        return jsonify(classes_entidade)
+        g = Graph()
+        with open(RDF_FILE, "r", encoding="utf-8") as f:
+            g.parse(f, format="turtle")
+        
+        # Busca recursiva de subclasses de EntidadeEmissora
+        subs = get_subclasses(g, "http://dre.pt/ontology#EntidadeEmissora")
+        
+        result = []
+        for s in subs:
+            label = s.split("#")[-1] # Tenta obter o nome curto
+            result.append({"uri": s, "label": label})
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/rdf/form-options", methods=["GET"])
 def api_rdf_form_options_fast():
-    """Usa o SQLite para popular os dropdowns de Documentos instantaneamente."""
+    """Lê o .ttl para buscar classes que herdam de Documento."""
     try:
-        db = get_db()
+        g = Graph()
+        with open(RDF_FILE, "r", encoding="utf-8") as f:
+            g.parse(f, format="turtle")
+            
+        # Busca recursiva de subclasses de DocumentoOficial
+        subs = get_subclasses(g, "http://dre.pt/ontology#DocumentoOficial")
         
-        # 1. Classes de Documentos (Mapeamento direto, super rápido)
-        classes_doc = [
-            {"uri": "http://dre.pt/ontology#Lei", "label": "Lei"},
-            {"uri": "http://dre.pt/ontology#DecretoLei", "label": "Decreto-Lei"},
-            {"uri": "http://dre.pt/ontology#Decreto", "label": "Decreto"},
-            {"uri": "http://dre.pt/ontology#Portaria", "label": "Portaria"},
-            {"uri": "http://dre.pt/ontology#Despacho", "label": "Despacho"},
-            {"uri": "http://dre.pt/ontology#Resolucao", "label": "Resolução"},
-            {"uri": "http://dre.pt/ontology#Aviso", "label": "Aviso"}
-        ]
+        classes_doc = [{"uri": s, "label": s.split("#")[-1]} for s in subs]
 
-        # 2. Entidades Emissoras do SQLite
-        linhas_entidades = db.execute("SELECT nome FROM entidade_emissora ORDER BY nome").fetchall()
+        # Entidades (para o dropdown da Secção B)
+        # Usamos uma query para buscar todas as instâncias de sub-classes de EntidadeEmissora
+        query_ents = """
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT DISTINCT ?ent ?nome WHERE {
+                ?ent rdf:type ?type .
+                ?type rdfs:subClassOf* <http://dre.pt/ontology#EntidadeEmissora> .
+                OPTIONAL { ?ent <http://dre.pt/ontology#nome> ?nome }
+            }
+        """
         entidades = []
-        for r in linhas_entidades:
-            nome = r["nome"]
-            # Constrói a URI a partir do nome para ser injetada no RDF depois
-            safe_name = urllib.parse.quote(nome.replace(" ", "_"))
-            entidades.append({
-                "uri": f"http://dre.pt/ontology#{safe_name}",
-                "label": nome
-            })
+        for r in g.query(query_ents):
+            ent_uri = str(r.ent)
+            ent_nome = str(r.nome or ent_uri.split("#")[-1])
+            entidades.append({"uri": ent_uri, "label": ent_nome})
 
-        # 3. Documentos Recentes do SQLite (Limitado aos últimos 1000 para não encravar o browser)
-        linhas_docs = db.execute("""
-            SELECT doc_type, numero, data 
-            FROM documento 
-            WHERE numero IS NOT NULL AND data IS NOT NULL
-            ORDER BY data DESC LIMIT 1000
-        """).fetchall()
-        
-        documentos = []
-        for r in linhas_docs:
-            tipo = r["doc_type"] or "Doc"
-            num = r["numero"]
-            data_pub = r["data"]
-            # Constrói a mesma URI lógica que usas para inserção
-            safe_num = urllib.parse.quote(num.replace("/", "_").replace(" ", ""))
-            doc_uri = f"http://dre.pt/ontology#Doc_{safe_num}_{data_pub.replace('-','')}"
-            documentos.append({
-                "uri": doc_uri,
-                "label": f"{tipo.capitalize()} nº {num} ({data_pub})"
-            })
-
-        return jsonify({
-            "classes_doc": classes_doc,
-            "entidades": entidades,
-            "documentos": documentos
-        })
+        return jsonify({"classes_doc": classes_doc, "entidades": entidades, "documentos": []})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+        
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

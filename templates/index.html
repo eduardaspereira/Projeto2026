@@ -24,6 +24,7 @@
         <div class="nav-dropdown-content" id="addDropdownMenu">
           <a href="#" onclick="openAddView('documento', event)">Inserir Documento</a>
           <a href="#" onclick="openAddView('entidade', event)">Inserir Entidade</a>
+          <a href="#" onclick="openAddView('classe', event)">Criar Classe OWL</a>
         </div>
       </div>
       <button onclick="showView('estatisticas', this)">📊 Estatísticas</button>
@@ -273,6 +274,33 @@
             </div>
 
             <button type="submit" class="btn btn-primary" id="btn-submit-rdf" style="width:100%">💾 Injetar no Ficheiro .bz2</button>
+          </form>
+        </div>
+        <div class="panel" id="panel-add-class" style="display: none;">
+          <h3>🏷️ Criar Nova Classe (Ontologia)</h3>
+          <p style="font-size:0.85rem;color:var(--cinza3);margin-bottom:1rem;">Define uma nova categoria taxonómica no grafo RDF (subclasse de um Documento ou Entidade).</p>
+          
+          <form class="add-form" onsubmit="addRDFClass(event)">
+            <div class="form-group">
+              <label>Nome da Nova Classe (Identificador sem espaços)</label>
+              <input type="text" name="nome_classe" placeholder="ex: AutoridadeEspecializada" required oninput="updateClassPreview()">
+            </div>
+
+            <div class="form-group">
+              <label>Classe Mãe (Superclasse)</label>
+              <select name="super_classe" id="rdf-parent-class" required onchange="updateClassPreview()">
+                <option value="">A carregar classes...</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Rótulo Legível (Label)</label>
+              <input type="text" name="label" placeholder="ex: Autoridade Especializada" required oninput="updateClassPreview()">
+            </div>
+
+            <div id="new-class-preview" style="margin-bottom:1.25rem;padding:.75rem;background:#fefcf2;border:1px dashed var(--ouro);border-radius:4px;font-family:var(--mono);font-size:.75rem;color:var(--cinza4);white-space:pre-wrap;word-break:break-all;">Preenche os campos para ver a simulação dos triplos RDF.</div>
+
+            <button type="submit" class="btn btn-primary" id="btn-submit-rdf-class" style="width:100%">💾 Gravar Nova Classe no .ttl</button>
           </form>
         </div>
 

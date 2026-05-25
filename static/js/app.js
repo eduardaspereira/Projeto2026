@@ -314,7 +314,8 @@ function renderResults(data) {
                      : r.categoria === 'Ato Administrativo' ? 'badge-adm'
                      : r.categoria === 'Ato Informativo' ? 'badge-info' : 'badge-outro';
     
-    const rowColor = r.is_entity ? 'background-color: #fefcf2;' : ''; 
+    // Entidades: fundo branco para destacar como pedido
+    const rowColor = r.is_entity ? 'background-color: #ffffff;' : ''; 
     const vigencia = r.is_entity ? '—' : (r.in_force ? '<span class="vigente">● Em vigor</span>' : '<span class="revogado">○ Revogado</span>');
     const pdf = r.url_pdf ? `<a href="${r.url_pdf}" target="_blank" class="link-doc" title="Abrir PDF">📄</a>` : '—';
     const shortSumario = (r.sumario||'').length > 120 ? r.sumario.slice(0,120) + '…' : (r.sumario||'—');
@@ -367,7 +368,9 @@ async function openRascunho(ev, id) {
 
   document.getElementById('modal-title').textContent = (d.owl_class || 'Documento') + (d.numero ? ' n.º ' + d.numero : '');
   
-  // O botão PDF foi adicionado ao flex-wrap abaixo do sumário
+  // O código abaixo garante a renderização do botão PDF
+  let pdfButton = d.url_pdf ? `<a href="${d.url_pdf}" target="_blank" class="btn btn-primary" style="font-size:.8rem;text-decoration:none">📄 Ver PDF</a>` : '';
+
   document.getElementById('modal-body').innerHTML = `
     <div class="meta-grid">
       <dl class="meta-item"><dt>Classe OWL</dt><dd><span class="badge badge-norm">${d.owl_class||'—'}</span></dd></dl>
@@ -378,16 +381,16 @@ async function openRascunho(ev, id) {
     ${d.sumario ? `<div class="sumario-box">${d.sumario}</div>` : ''}
     
     <div style="display:flex;gap:.5rem;margin:.75rem 0;flex-wrap:wrap">
-      ${d.url_pdf ? `<a href="${d.url_pdf}" target="_blank" class="btn btn-primary" style="font-size:.8rem;text-decoration:none">📄 Ver PDF</a>` : ''}
+      ${pdfButton}
     </div>
 
     <div style="font-family:var(--mono);font-size:.68rem;color:var(--cinza3);margin-top:1rem">
-      Fonte: ${d.fonte||'—'}<br>
       Criado: ${d.criado_em||'—'}
     </div>
   `;
   document.getElementById('modal-overlay').classList.add('open');
 }
+
 
 async function removeAddedEntity(ev, id) {
   ev.stopPropagation();
@@ -564,27 +567,40 @@ function removeCustomClass(cls) {
 
 async function loadOntologyClasses() {
   try {
-    // Carregar todas as classes disponíveis para o selector
+    // Carregar todas as classes disponíveis para os selectors e optgroups
     const res = await fetch('/api/owl-classes-all');
     if (!res.ok) {
       console.error('Erro ao carregar classes:', res.status);
       return;
     }
     const classes = await res.json();
-    
-    // Popular a seleção de classes existentes
-    const otherGroup = document.getElementById('other-classes-group');
-    if (otherGroup && classes && classes.length > 0) {
-      // Filtrar as que já estão no primeiro optgroup
-      const existentes = new Set(['dre:EntidadeEmissora', 'dre:OrgaoSoberano', 'dre:Ministerio', 
-                                  'dre:EntidadeLocal', 'dre:EntidadeRegional', 'dre:EntidadePublicaEmpresarial', 'dre:Tribunal']);
-      const outras = classes.filter(c => !existentes.has(c.cls));
-      
-      if (outras.length > 0) {
-        otherGroup.innerHTML = outras.map(c => 
-          `<option value="${c.cls}">${c.label}</option>`
-        ).join('');
-      }
+    if (!Array.isArray(classes)) return;
+
+    // Popular selects que esperam URIs (forms RDF)
+    const rdfClassSel = document.getElementById('rdf-class-selector');
+    const rdfDocType = document.getElementById('rdf-doc-type');
+    const rdfParent = document.getElementById('rdf-parent-class');
+    const classSelector = document.getElementById('class-selector');
+
+    const uriOptions = classes.map(c => `<option value="${c.uri}">${c.label}</option>`).join('');
+    if (rdfClassSel) rdfClassSel.innerHTML = `<option value="">Selecione uma classe...</option>` + uriOptions;
+    if (rdfDocType) rdfDocType.innerHTML = `<option value="">Selecione tipo de documento...</option>` + uriOptions;
+    if (rdfParent) rdfParent.innerHTML = `<option value="">Selecione classe mãe...</option>` + uriOptions;
+
+    // Popular selector usado na criação de entidades (usa forma curta dre:...)
+    if (classSelector) {
+      const entityClasses = classes.filter(c => Array.isArray(c.parents) && c.parents.includes('dre:EntidadeEmissora'));
+      const otherClasses = classes.filter(c => !(Array.isArray(c.parents) && c.parents.includes('dre:EntidadeEmissora')));
+
+      const entOptions = entityClasses.map(c => `<option value="${c.cls}">${c.label}</option>`).join('');
+      const otherOptions = otherClasses.map(c => `<option value="${c.cls}">${c.label}</option>`).join('');
+
+      classSelector.innerHTML = `
+        <option value="">Selecione ou crie uma classe...</option>
+        <option value="__NEW__">-- Criar nova classe --</option>
+        <optgroup label="Entidades">${entOptions}</optgroup>
+        <optgroup label="Outras Classes" id="other-classes-group">${otherOptions}</optgroup>
+      `;
     }
   } catch (err) {
     console.error('Erro ao carregar ontologia:', err);
@@ -768,10 +784,11 @@ async function loadOwlClasses() {
     const usedClasses = await res2.json();
     const countMap = new Map(usedClasses.map(c => [c.owl_class, c.count]));
     
-    // Combinar dados: mostrar todas as classes, com contagem se disponível
+    // Combinar dados: mostrar classes declaradas OU usadas na BD
     const classList = document.getElementById('owl-class-list');
     if (classList) {
-      classList.innerHTML = allClasses.map(c => {
+      const declaredOrUsed = allClasses.filter(c => c.declared || (countMap.get(c.cls) || 0) > 0);
+      classList.innerHTML = declaredOrUsed.map(c => {
         const count = countMap.get(c.cls) || 0;
         return `<div class="onto-class" onclick="filterByClass('${c.cls}', this)" title="${c.cls}" style="opacity: ${count > 0 ? 1 : 0.6}">
           <span class="cls-name">${c.label}</span>
@@ -827,7 +844,6 @@ window.addEventListener('click', function(e) {
   }
 });
 
-// ATUALIZAÇÃO DA FUNÇÃO openAddView
 function openAddView(type, ev) {
   if (ev) ev.preventDefault();
   
@@ -836,17 +852,116 @@ function openAddView(type, ev) {
 
   const panelDoc = document.getElementById('panel-add-doc');
   const panelEnt = document.getElementById('panel-add-ent');
+  const panelClass = document.getElementById('panel-add-class'); // NOVO
 
+  // Esconder todos por defeito
+  panelDoc.style.display = 'none';
+  panelEnt.style.display = 'none';
+  panelClass.style.display = 'none';
+
+  // Mostrar o selecionado e carregar respetivos dados
   if (type === 'documento') {
     panelDoc.style.display = 'block';
-    panelEnt.style.display = 'none';
     loadRdfDocumentOptions();
-  } else {
-    panelDoc.style.display = 'none';
+  } else if (type === 'entidade') {
     panelEnt.style.display = 'block';
     loadRdfEntityClasses(); 
+  } else if (type === 'classe') {
+    panelClass.style.display = 'block';
+    loadRdfParentClasses();
   }
 }
+
+
+// --- Lógica de Criação de Classes OWL ---
+
+async function loadRdfParentClasses() {
+  const sel = document.getElementById('rdf-parent-class');
+  sel.innerHTML = '<option value="">A carregar opções...</option>';
+  
+  try {
+    // Reutilizamos os endpoints rápidos que já temos para popular isto
+    const resDocs = await fetch('/api/rdf/form-options');
+    const dataDocs = await resDocs.json();
+    
+    const resEnts = await fetch('/api/rdf/classes');
+    const dataEnts = await resEnts.json();
+
+    let html = '<option value="">— selecione a superclasse mãe —</option>';
+    
+    html += '<optgroup label="Hierarquia de Entidades">';
+    html += '<option value="http://dre.pt/ontology#EntidadeEmissora">🏛️ Entidade Emissora (Raiz)</option>';
+    dataEnts.forEach(c => {
+      // Evita duplicar a raiz
+      if(c.uri !== "http://dre.pt/ontology#EntidadeEmissora") html += `<option value="${c.uri}">${c.label}</option>`;
+    });
+    html += '</optgroup>';
+
+    html += '<optgroup label="Hierarquia de Documentos">';
+    html += '<option value="http://dre.pt/ontology#DocumentoOficial">📄 Documento Oficial (Raiz)</option>';
+    dataDocs.classes_doc.forEach(c => html += `<option value="${c.uri}">${c.label}</option>`);
+    html += '</optgroup>';
+
+    sel.innerHTML = html;
+    updateClassPreview();
+  } catch (err) {
+    sel.innerHTML = '<option value="">Erro ao carregar</option>';
+  }
+}
+
+function updateClassPreview() {
+  const form = document.querySelector('#panel-add-class form');
+  const nome = form.nome_classe.value.trim().replace(/\s+/g, ''); // Força remoção de espaços
+  const parent = form.super_classe.value;
+  const label = form.label.value.trim();
+  const preview = document.getElementById('new-class-preview');
+
+  if (!nome || !parent) {
+    preview.textContent = "Preenche o nome e escolhe a superclasse para ver os triplos gerados.";
+    return;
+  }
+
+  const parentShort = parent.split('#').pop();
+  let text = `dre:${nome} a owl:Class ;\n`;
+  text += `    rdfs:subClassOf dre:${parentShort} ;\n`;
+  if (label) text += `    rdfs:label "${label}"@pt .\n`;
+  else text += `    .\n`;
+
+  preview.textContent = text;
+}
+
+async function addRDFClass(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-submit-rdf-class');
+  btn.textContent = 'A injetar classe no grafo...';
+  btn.disabled = true;
+
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd);
+
+  try {
+    const res = await fetch('/api/rdf/classe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    
+    const d = await res.json();
+    if (d.ok) {
+      showToast('Nova Classe OWL adicionada à ontologia!');
+      e.target.reset();
+      updateClassPreview();
+    } else {
+      showToast('Erro: ' + (d.error || 'Falha na inserção'), true);
+    }
+  } catch(err) {
+    showToast('Erro de comunicação com o servidor.', true);
+  } finally {
+    btn.textContent = '💾 Gravar Nova Classe no .ttl';
+    btn.disabled = false;
+  }
+}
+
 
 async function loadRdfDocumentOptions() {
   const selType = document.getElementById('rdf-doc-type');

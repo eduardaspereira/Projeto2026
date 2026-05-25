@@ -23,13 +23,6 @@
     owl:imports dct: ;
     owl:versionInfo "1.0" .
 
-dre:Anuncio a owl:Class ;
-    rdfs:label "Anúncio"@pt ;
-    rdfs:comment "Publicação de carácter informativo geral."@pt ;
-    rdfs:subClassOf dre:AtoInformativo ;
-    skos:notation "ANÚNCIO",
-        "Anúncio" .
-
 dre:AnuncioProcedimento a owl:Class ;
     rdfs:label "Anúncio de Procedimento"@pt ;
     rdfs:comment "Publicação de abertura de concursos e procedimentos públicos."@pt ;
@@ -295,12 +288,31 @@ dre:urlTextoIntegral a owl:DatatypeProperty ;
     rdfs:domain dre:DocumentoOficial ;
     rdfs:range xsd:anyURI .
 
+ns1:Avisonr2 a owl:Class ;
+    rdfs:label "Aviso label 2"@pt,
+        "Profile Views"@pt ;
+    rdfs:subClassOf ns1:Aviso,
+        ns1:EntidadeEmissora,
+        ns1:novaclasse .
+
+ns1:Decretoc%C3%B3pia a owl:Class ;
+    rdfs:label "decreto copia"@pt ;
+    rdfs:subClassOf ns1:Decreto .
+
+ns1:gandaclasse a owl:Class ;
+    rdfs:label "rotulo e label"@pt ;
+    rdfs:subClassOf dre:Anuncio .
+
 ns1:nova_entidade_em a ns1:EntidadeEmissora ;
     ns1:nome "nova entidade em" .
 
 ns1:nova_entidade_local a ns1:EntidadeLocal,
         ns1:OrgaoSoberano ;
     ns1:nome "nova entidade local" .
+
+ns1:reitificacao2 a owl:Class ;
+    rdfs:label "rotulo e label 2"@pt ;
+    rdfs:subClassOf dre:Rectificacao .
 
 drex:AssembleiaRepublica a dre:OrgaoSoberano ;
     rdfs:label "Assembleia da República"@pt ;
@@ -373,6 +385,13 @@ drex:TribunalConstitucional a dre:Tribunal ;
     rdfs:label "Tribunal Constitucional"@pt ;
     dre:nomeEntidade "Tribunal Constitucional" .
 
+dre:Anuncio a owl:Class ;
+    rdfs:label "Anúncio"@pt ;
+    rdfs:comment "Publicação de carácter informativo geral."@pt ;
+    rdfs:subClassOf dre:AtoInformativo ;
+    skos:notation "ANÚNCIO",
+        "Anúncio" .
+
 dre:Aviso a owl:Class ;
     rdfs:label "Aviso"@pt ;
     rdfs:comment "Publicação informativa de entidade pública, sem carácter normativo direto."@pt ;
@@ -399,13 +418,6 @@ dre:Lei a owl:Class ;
     rdfs:comment "Ato legislativo da Assembleia da República."@pt ;
     rdfs:subClassOf dre:AtoNormativo ;
     skos:notation "Lei" .
-
-dre:Rectificacao a owl:Class ;
-    rdfs:label "Retificação / Rectificação"@pt ;
-    rdfs:comment "Correção de erros materiais de atos normativos anteriormente publicados."@pt ;
-    rdfs:subClassOf dre:AtoNormativo ;
-    skos:notation "Rectificação",
-        "Retificação" .
 
 dre:Tribunal a owl:Class ;
     rdfs:label "Tribunal"@pt ;
@@ -453,7 +465,9 @@ dre:urlPDF a owl:DatatypeProperty ;
 
 <http://dre.pt/ontology#%2BIDH_-_Associa%C3%A7%C3%A3o_para_o_Desenvolvimento_Local_de_Pa%C3%A7os_de_Ferreira> ns1:emitiu ns1:Doc_999_20260430 .
 
-<http://dre.pt/ontology#-_C%C3%82MARA_MUNICIPAL_DE_VILA_VERDE_-__An%C3%BAncio> ns1:emitiu ns1:Doc_422_20260514 .
+<http://dre.pt/ontology#-_Escola_B%C3%A1sica_e_Secund%C3%A1ria_das_Flores> ns1:emitiu ns1:Doc_2112_20260506 .
+
+<http://dre.pt/ontology#-_Minist%C3%A9rio_do_Ambiente%2C_do_Ordenamento_do_Territ%C3%B3rio_e_do_Desenvolvimento_Regional_-_Instituto_da_Conserva%C3%A7%C3%A3o_da_Natureza_e_da_Biodiversidade%2C_I._P._-_Departamento_de_Gest%C3%A3o_de_%C3%81reas_Classificadas_-_Norte/Parque_Nacional_da_Peneda-Ger%C3%AAs> ns1:emitiu ns1:Doc_11_20260511 .
 
 ns1:1.%C2%AA_Vara_Com_Compet%C3%AAncia_Mista_do_Tribunal_da_Comarca_de_Loures ns1:emitiu ns1:Doc_12_20260516 .
 
@@ -467,6 +481,14 @@ ns1:Doc_121_20260514 a ns1:Lei ;
     ns1:numero "121"^^xsd:string ;
     ns1:numeroDR "121"^^xsd:string ;
     ns1:sumario "wqwq"^^xsd:string .
+
+ns1:Doc_2112_20260506 a ns1:Lei ;
+    ns1:dataPublicacao "2026-05-06"^^xsd:date ;
+    ns1:emitidoPor <http://dre.pt/ontology#-_Escola_B%C3%A1sica_e_Secund%C3%A1ria_das_Flores> ;
+    ns1:numero "2112"^^xsd:string ;
+    ns1:numeroDR "121"^^xsd:string ;
+    ns1:sumario "PDF Test File Congratulations, your comput er is equipped with a PDF (Portable Document Format) reader! You should be able to view any of the PDF documents and forms available on our site. PDF forms a..."^^xsd:string ;
+    ns1:urlPDF "https://www.orimi.com/pdf-test.pdf"^^xsd:anyURI .
 
 ns1:Doc_422_20260513 a ns1:Decreto ;
     ns1:dataPublicacao "2026-05-13"^^xsd:date ;
@@ -484,8 +506,6 @@ ns1:Doc_7087_2024_20240412 ns1:revogadoPor ns1:Doc_422_20260514 .
 
 ns1:Doc_7091_2024_20240412 ns1:revogadoPor ns1:Doc_12_20260516 .
 
-ns1:Doc_7095_2024_20240412 ns1:revogadoPor ns1:Doc_121_20260519 .
-
 ns1:Educa%C3%A7%C3%A3o%2C_Trabalho%2C_Solidariedade_e_Seguran%C3%A7a_Social_e_Entidades_de_Utilidade_P%C3%BAblica_Desportiva_-_Instituto_Portugu%C3%AAs_do_Desporto_e_Juventude%2C_I._P.%2C_Instituto_Nacional_para_a_Reabilita%C3%A7%C3%A3o%2C_I._P.%2C_e_Federa%C3%A7%C3%A3o_Portuguesa_de_Actividades_Subaqu%C3%A1ticas ns1:emitiu ns1:Doc_422_20260513 .
 
 ns1:ent123 a ns1:EntidadeEmissora,
@@ -493,6 +513,10 @@ ns1:ent123 a ns1:EntidadeEmissora,
         ns1:OrgaoSoberano ;
     ns1:emitiu ns1:Doc_121_20260519 ;
     ns1:nome "ent123" .
+
+ns1:novaclasse a owl:Class ;
+    rdfs:label "label do rotulo"@pt ;
+    rdfs:subClassOf ns1:EntidadeEmissora .
 
 dre:EntidadeRegional a owl:Class ;
     rdfs:label "Entidade Regional"@pt ;
@@ -503,6 +527,24 @@ dre:OrgaoSoberano a owl:Class ;
     rdfs:label "Órgão de Soberania"@pt ;
     rdfs:comment "Presidência da República, Assembleia da República, Governo, Tribunais."@pt ;
     rdfs:subClassOf dre:EntidadeEmissora .
+
+dre:Rectificacao a owl:Class ;
+    rdfs:label "Retificação / Rectificação"@pt ;
+    rdfs:comment "Correção de erros materiais de atos normativos anteriormente publicados."@pt ;
+    rdfs:subClassOf dre:AtoNormativo ;
+    skos:notation "Rectificação",
+        "Retificação" .
+
+<http://dre.pt/ontology#-_C%C3%82MARA_MUNICIPAL_DE_VILA_VERDE_-__An%C3%BAncio> ns1:emitiu ns1:Doc_422_20260514,
+        ns1:Doc_ww2_20260519 .
+
+ns1:Doc_11_20260511 a ns1:Lei ;
+    ns1:dataPublicacao "2026-05-11"^^xsd:date ;
+    ns1:emitidoPor <http://dre.pt/ontology#-_Minist%C3%A9rio_do_Ambiente%2C_do_Ordenamento_do_Territ%C3%B3rio_e_do_Desenvolvimento_Regional_-_Instituto_da_Conserva%C3%A7%C3%A3o_da_Natureza_e_da_Biodiversidade%2C_I._P._-_Departamento_de_Gest%C3%A3o_de_%C3%81reas_Classificadas_-_Norte/Parque_Nacional_da_Peneda-Ger%C3%AAs> ;
+    ns1:numero "11"^^xsd:string ;
+    ns1:numeroDR "111"^^xsd:string ;
+    ns1:revoga ns1:Doc_7095_2024_20240412 ;
+    ns1:sumario "resumo da leiiiii2"^^xsd:string .
 
 ns1:Doc_121_20260519 a ns1:Lei ;
     ns1:dataPublicacao "2026-05-19"^^xsd:date ;
@@ -537,9 +579,21 @@ ns1:Doc_999_20260430 a ns1:Lei ;
     ns1:sumario "isto é uma lei teste"^^xsd:string ;
     ns1:tema "impostos"^^xsd:string .
 
+ns1:Doc_ww2_20260519 a ns1:Lei ;
+    ns1:dataPublicacao "2026-05-19"^^xsd:date ;
+    ns1:emitidoPor <http://dre.pt/ontology#-_C%C3%82MARA_MUNICIPAL_DE_VILA_VERDE_-__An%C3%BAncio> ;
+    ns1:numero "ww2"^^xsd:string ;
+    ns1:numeroDR "212"^^xsd:string ;
+    ns1:revoga ns1:Doc_7095_2024_20240412 ;
+    ns1:sumario "PDF Test File Congratulations, your comput er is equipped with a PDF (Portable Document Format) reader! You should be able to view any of the PDF documents and forms available on our site. PDF forms a..."^^xsd:string .
+
 dre:RecursoDigital a owl:Class ;
     rdfs:label "Recurso Digital"@pt ;
     rdfs:comment "Ficheiro digital associado ao documento (PDF, texto integral, etc.)."@pt .
+
+ns1:Doc_7095_2024_20240412 ns1:revogadoPor ns1:Doc_11_20260511,
+        ns1:Doc_121_20260519,
+        ns1:Doc_ww2_20260519 .
 
 dre:PublicacaoDR a owl:Class ;
     rdfs:label "Publicação no Diário da República"@pt ;
